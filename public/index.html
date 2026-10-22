@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f5f0">
+  <meta name="description" content="输入日语歌词，逐词对齐罗马音、原词与中文词义。把喜欢的歌，唱得更明白。">
+  <title>日语小白唱见拯救计划</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23c55c43'/%3E%3Ctext x='20' y='29' text-anchor='middle' font-size='29' fill='white'%3Eあ%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/patch.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .5 1.5L22 4l-1.5.5L20 6l-.5-1.5L18 4l1.5-.5Z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5C8 2 3 3 3 3v16s5-1 9 2c4-3 9-2 9-2V3s-5-1-9 2Zm0 0v16"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="日语小白唱见拯救计划首页"><span class="brand-mark">あ<span>♪</span></span><span class="brand-name">日语小白<span>唱见拯救计划</span></span></a>
+    <nav class="nav" aria-label="主导航"><span class="nav-active">歌词分析</span><button class="nav-link" id="guideBtn" type="button">使用指南</button></nav>
+    <button id="settingsBtn" class="button button-quiet settings-button" type="button"><span class="connection-dot" id="connectionDot"></span><svg><use href="#i-settings"/></svg>模型设置</button>
+  </header>
+
+  <main class="main">
+    <section class="intro">
+      <div><div class="eyebrow"><span></span> SING WITH UNDERSTANDING</div><h1>把喜欢的歌，<span>唱得更明白。</span></h1><p>从一个词到一整句，让读音与词义，一一对齐。</p></div>
+      <div class="intro-note" aria-hidden="true"><span class="note-symbol">♫</span><span>ことばを、ひとつずつ。<small>每一个词，都有自己的位置。</small></span></div>
+    </section>
+
+    <div class="workspace" id="workspace">
+      <aside class="editor-panel" aria-label="歌词输入">
+        <div class="panel-heading"><div><span class="step-number">01</span><h2>放入你的歌词</h2></div><span class="mini-label">INPUT</span></div>
+        <div class="editor-body">
+          <label class="field-label" for="songTitle">歌曲名称 <span>选填</span></label>
+          <input id="songTitle" class="text-input" maxlength="120" placeholder="给这页歌词起个名字">
+          <div class="field-heading"><label class="field-label" for="lyrics">日语歌词</label><button type="button" id="clearBtn" class="text-button">清空</button></div>
+          <div class="textarea-wrap"><textarea id="lyrics" spellcheck="false" maxlength="16000" placeholder="在这里粘贴日语歌词…&#10;&#10;悪戯は　知らん顔で&#10;言い訳は　涙を使って&#10;&#10;也可以连同参考罗马音一起粘贴。"></textarea><div class="input-stats"><span id="inputCount">0 句</span><span id="charCount">0 / 16,000</span></div></div>
+          <label class="field-label format-label" for="inputMode">输入格式</label>
+          <select id="inputMode" class="text-input"><option value="auto">自动识别参考罗马音</option><option value="raw">只有原歌词（保留外语行）</option><option value="paired">原歌词与罗马音交替成对</option></select>
+          <p class="field-help" id="inputHint">逐句换行；副歌和重复句也请完整保留。</p>
+          <button type="button" id="analyzeBtn" class="button button-primary"><svg><use href="#i-spark"/></svg><span>开始逐句分析</span><svg class="arrow"><use href="#i-arrow"/></svg></button>
+          <button type="button" id="cancelBtn" class="button button-outline" hidden>取消分析</button>
+          <p class="submission-note">点击后，歌词将发送给你配置的模型服务。</p>
+          <div id="analysisStatus" class="analysis-status" role="status" aria-live="polite" hidden></div>
+          <div id="analysisProgress" class="progress" role="progressbar" aria-label="分析进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span></span></div>
+          <div class="sample-box"><div class="sample-icon"><svg><use href="#i-book"/></svg></div><div><strong>先听懂一首歌</strong><span>用刚才的完整歌词，看看对齐效果。</span></div><button id="sampleBtn" type="button" aria-label="载入完整示例"><svg><use href="#i-arrow"/></svg></button></div>
+          <div class="import-section"><button id="importBtn" type="button" class="text-button"><svg><use href="#i-download"/></svg>导入分析 JSON</button><input type="file" id="importFile" accept=".json,application/json" hidden><span>继续上次的练习</span></div>
+        </div>
+        <div class="editor-footer"><span class="tiny-dot"></span>歌词与结果自动保存在本机浏览器</div>
+      </aside>
+
+      <section class="results-panel" aria-label="歌词分析结果">
+        <div class="panel-heading results-heading"><div><span class="step-number">02</span><h2>逐词研习</h2><span class="result-badge" id="resultBadge">对齐阅读</span></div><div class="result-actions"><button id="copyBtn" type="button" class="icon-button" title="复制完整四行文本" aria-label="复制完整四行文本"><svg><use href="#i-copy"/></svg></button><button id="exportBtn" type="button" class="button button-small"><svg><use href="#i-download"/></svg>导出</button></div></div>
+        <div class="reading-toolbar"><div class="view-tabs" role="group" aria-label="阅读视图"><button id="gridBtn" type="button" class="selected" aria-pressed="true"><svg><use href="#i-grid"/></svg>词格视图</button><button id="cleanBtn" type="button" aria-pressed="false">简洁视图</button></div><div class="reading-options"><label for="fontSize" class="font-control"><span>字</span><input id="fontSize" type="range" min="17" max="27" value="21" aria-label="原词字号"><span>字</span></label><span class="tool-divider"></span><button id="focusBtn" type="button" class="icon-button" title="专注阅读" aria-label="专注阅读" aria-pressed="false"><svg><use href="#i-expand"/></svg></button></div></div>
+        <div class="sheet-meta"><div><div class="sheet-eyebrow" id="sheetEyebrow">YOUR LYRIC NOTEBOOK</div><h2 id="sheetTitle">你的下一首歌</h2><p id="sheetSubtitle">从左侧输入歌词，开始读懂每一句。</p></div><div class="sheet-stamp" aria-hidden="true">詞<span>KOTOBA</span></div></div>
+        <div class="legend" aria-label="词格阅读说明"><span><i class="legend-romaji"></i>罗马音</span><span><i class="legend-japanese"></i>原词 · 假名</span><span><i class="legend-meaning"></i>逐词译义</span><span><i class="legend-sentence"></i>整句翻译</span><span class="alignment-tip">一词一格 · 上下对齐</span></div>
+        <div id="sheet" class="lyric-sheet"></div>
+        <div id="emptyState" class="empty-state"><div class="empty-kana">うた<span>♪</span></div><h3>你的歌，从这里读懂</h3><p>粘贴歌词，或载入一份完整示例。<br>读音、原词与词义，会在这里各就各位。</p><button type="button" id="emptySampleBtn" class="button button-outline">看看示例<svg><use href="#i-arrow"/></svg></button></div>
+        <div id="sheetEnd" class="sheet-end" hidden><span></span>ひとつずつ、歌になる。<span></span></div>
+      </section>
+    </div>
+  <footer class="site-footer"><span>日语小白唱见拯救计划 <span class="footer-dot">·</span> 给每一个想唱懂日语歌的人</span><span>一首歌，一点点靠近。</span></footer>
+  </main>
+
+  <dialog id="settingsDialog" class="modal"><form id="settingsForm"><div class="modal-heading"><div><span class="eyebrow">MODEL CONNECTION</span><h2>连接模型</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭模型设置"><svg><use href="#i-close"/></svg></button></div><p class="modal-intro">支持 DeepSeek、OpenAI 以及其他兼容 Chat Completions 的服务。密钥只保存在本机浏览器，并随分析请求发送。</p><div id="publicConfigNote" class="notice" hidden>请输入你自己的 API Key；本站不会替你保存或展示密钥。</div><fieldset id="configFields"><label class="field-label" for="baseUrl">API 根地址</label><input id="baseUrl" class="text-input" type="url" placeholder="例如 https://api.deepseek.com 或 https://api.openai.com/v1"><p class="field-help">填写到 API 根地址，不要加 /chat/completions。DeepSeek 可填 https://api.deepseek.com。</p><label class="field-label" for="modelName">模型名称</label><input id="modelName" class="text-input" placeholder="例如 deepseek-flash 或 OpenAI 模型 ID"><label class="field-label" for="apiKey">API Key</label><input id="apiKey" class="text-input" type="password" autocomplete="off" placeholder="在这里输入 sk-… 密钥"><p class="field-help">模型地址、名称和密钥保存在这台电脑的浏览器本地存储。请勿在公用电脑上使用；点下方按钮可删除已保存密钥。</p><label class="field-label" for="outputFormat">输出格式</label><select id="outputFormat" class="text-input"><option value="json_object">JSON 对象（DeepSeek 等兼容服务）</option><option value="json_schema">严格结构化 JSON（OpenAI 推荐）</option><option value="prompt">仅提示词约束（其他兼容服务）</option></select></fieldset><p id="settingsStatus" class="field-help" role="status"></p><div class="modal-footer"><button type="button" id="forgetKeyBtn" class="text-button">清除本机密钥</button><button class="button button-primary" type="submit">保存并连接<svg><use href="#i-check"/></svg></button></div></form></dialog>
+
+<dialog id="guideDialog" class="modal"><div class="modal-heading"><div><span class="eyebrow">A SMALL GUIDE</span><h2>从喜欢，到唱懂</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭指南"><svg><use href="#i-close"/></svg></button></div><ol class="guide-steps"><li><strong>粘贴原歌词</strong><p>每句单独一行，重复段落完整保留。可以附上参考罗马音；自动识别仅识别按音节空格分开的罗马音，连续拼写请选择成对模式，混合外语请选择原歌词模式。</p></li><li><strong>接入模型，开始分析</strong><p>第一次分析时会弹出模型设置。可以使用 DeepSeek、OpenAI 或其他兼容服务；填写对应的 API 根地址、模型名和自己的 API Key。密钥保存在本机浏览器。</p></li><li><strong>沿着词格，一句句练习</strong><p>从上到下读罗马音、原词与词义，下面是整句译文。促音用 ~ 表示，如 ya~tte。长句可左右滑动，重复句各自完整显示。</p></li><li><strong>把练习带走</strong><p>复制四行文本，导出可重新导入的 JSON，或通过浏览器打印保存 PDF。模型读音和翻译可在导出 JSON 中修正后重新导入。</p></li></ol><div class="notice">特殊演唱读音依赖你提供的标音或参考罗马音；只凭文字无法确认音源。输入变化后请重新分析，页面会标记尚未同步的结果。</div></dialog>
+
+  <dialog id="exportDialog" class="modal export-modal"><div class="modal-heading"><div><span class="eyebrow">TAKE YOUR NOTES</span><h2>带走这页歌词</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭导出"><svg><use href="#i-close"/></svg></button></div><div class="export-options"><button id="exportJsonBtn" type="button"><span>JSON</span><div><strong>完整分析数据</strong><small>可重新导入，保留全部词格</small></div><svg><use href="#i-arrow"/></svg></button><button id="exportTextBtn" type="button"><span>TXT</span><div><strong>四行对照文本</strong><small>罗马音、原词、逐词译义、整句译文</small></div><svg><use href="#i-arrow"/></svg></button><button id="printBtn" type="button"><span>PDF</span><div><strong>打印 / 保存为 PDF</strong><small>调用浏览器打印，保留对齐排版</small></div><svg><use href="#i-arrow"/></svg></button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

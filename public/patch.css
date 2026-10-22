@@ -1,0 +1,50 @@
+/* Readability and live-generation refinements, kept separate from the base layout. */
+.token {
+  grid-template-rows: 35px minmax(44px, auto) 29px;
+}
+
+.token-romaji {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.progress {
+  position: relative;
+}
+
+.progress.is-streaming::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 28%;
+  background: #9aa584;
+  content: "";
+  animation: stream-progress 1.25s ease-in-out infinite;
+}
+
+@keyframes stream-progress {
+  from { transform: translateX(-105%); }
+  to { transform: translateX(460%); }
+}
+
+@media (max-width: 680px) {
+  .token {
+    grid-template-rows: 34px minmax(44px, auto) 29px;
+  }
+
+  .token-romaji {
+    font-size: 15px;
+  }
+}
+
+@media print {
+  .token {
+    grid-template-rows: 24px 32px 24px;
+  }
+
+  .token-romaji {
+    font-size: 12px;
+  }
+}

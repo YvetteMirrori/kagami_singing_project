@@ -1,0 +1,12 @@
+{
+  "name": "kotoba-lyrics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "日语歌词逐词分析与对齐阅读工作台",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

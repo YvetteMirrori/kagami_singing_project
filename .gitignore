@@ -1,0 +1,52 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.work/
+.codex_work/
+dist/
+build/
+coverage/
+.cache/
+*.log
+*.pid
+*.tmp
+*.temp
+*.tar.gz
+
+# Local credentials and private keys
+.ssh/
+.aws/
+credentials/
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.ppk
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+known_hosts
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Machine-specific deployment notes
+/docs/公网部署.md
+
+# Local archives and database dumps
+*.zip
+*.tar
+*.tgz
+*.7z
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+*.dump
