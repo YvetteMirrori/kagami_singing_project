@@ -30,6 +30,35 @@ test('自动识别音节罗马音，保留英语、德语、台词、重复句',
   assert.equal(parseLyrics('愛\nai', 'raw').length, 2);
   assert.throws(() => parseLyrics('愛\n夢', 'paired'), /参考罗马音/);
 });
+test('自动识别带引号、长音和英语片段的参考罗马音', () => {
+  const text = [
+    '愛のネタバレ 「別れ」っぽいな', 'a i no ne ta ba re 「wa ka re」ppo i na',
+    '景気いいけど　品性はTHE END', 'ke i ki i i ke do hi n se i wa THE END',
+    '神っぽいな　それ　卑怯　神っぽいな　それ　"My God"', 'ka mi ppo i na so re hi kyo u ka mi ppo i na so re "My God"',
+    '飽きっぽいんだ　オーケー　みんな　飽きっぽいんだ　オーケー', 'a ki ppo i n da oo kee mi n na a ki ppo i n da oo kee',
+    '批判に見せかけ自戒の祈り　Do you know？', 'hi ha n ni mi se ka ke ji ka i no i no ri Do you know?',
+    'アイウォンチュー　IQが下がっていく感じ', 'a i u o n chuu IQga sa ga tte i ku ka n ji',
+    'きっしょいね　きっしょいね', 'ki ssho i ne ki ssho i ne',
+    'とぅ　とぅる　"風"', 'to u to u ru "ka ze"',
+    '畢竟', 'hi kkyo u'
+  ].join('\n');
+  const lines = parseLyrics(text);
+  assert.equal(lines.length, 9);
+  assert.deepEqual(lines.map(line => line.reference), [
+    'a i no ne ta ba re 「wa ka re」ppo i na',
+    'ke i ki i i ke do hi n se i wa THE END',
+    'ka mi ppo i na so re hi kyo u ka mi ppo i na so re "My God"',
+    'a ki ppo i n da oo kee mi n na a ki ppo i n da oo kee',
+    'hi ha n ni mi se ka ke ji ka i no i no ri Do you know?',
+    'a i u o n chuu IQga sa ga tte i ku ka n ji',
+    'ki ssho i ne ki ssho i ne',
+    'to u to u ru "ka ze"',
+    'hi kkyo u'
+  ]);
+  assert.equal(parseLyrics('愛\nDo you know what I mean').length, 2);
+  assert.equal(parseLyrics('愛\nWe are the children of the world').length, 2);
+  assert.equal(parseLyrics('愛\nI love you').length, 2);
+});
 test('用户原始输入的全部参考罗马音均正确识别，含 tchi / tcha 促音', () => {
   const references = [
     'i ta zu ra wa shi ra n ka o de', 'i i wa ke wa na mi da wo tsu ka tte',

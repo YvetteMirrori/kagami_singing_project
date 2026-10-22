@@ -6,9 +6,23 @@ export function stripReadings(text) {
 }
 export function canonical(text) { return stripReadings(text).replace(/\s/gu, ''); }
 
-function isSpacedRomaji(text) {
-  const pieces = text.toLowerCase().replace(/[?!.,]/g, ' ').replace(/['’~\-]/g, '').trim().split(/\s+/);
-  return pieces.length >= 3 && pieces.every(p => /^(?:[aeiou]|n|[kgsztdnhbpmrywfvj]?[hy]?[aeiou]|sh[aeiou]|ch[aeiou]|tch[aeiou]|ts[aeiou]|tt[aeiou]|kk[aeiou]|pp[aeiou]|ss[aeiou])$/.test(p));
+function isSpacedRomaji(text, original) {
+  // References copied from music services often contain punctuation, quoted
+  // words, long-vowel spellings ("oo", "kee") and embedded English. Strip
+  // those decorations before checking whether the line is syllable-spaced.
+  let reference = text.normalize('NFKC').toLowerCase();
+  const foreign = original.normalize('NFKC').match(/[A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z][A-Za-z0-9]*)*/g) || [];
+  for (const phrase of foreign) {
+    // Only allow foreign words already present in the original. Acronyms may
+    // be joined to a Japanese particle in copied references, e.g. "IQga".
+    const pattern = phrase.toLowerCase().split(/\s+/).join('\\s+');
+    reference = reference.replace(new RegExp(`\\b${pattern}(?=$|[^a-z0-9]|(?:ga|wa|wo|ni|to|de)(?:\\s|$))`, 'g'), ' ');
+  }
+  const pieces = reference
+    .replace(/[「」『』"“”'’?!.,:;，。！？、~\-]/g, ' ')
+    .trim().split(/\s+/).filter(Boolean);
+  const syllable = /^(?:n|(?:[kgsztdnhbpmrywfvj]?[hy]?|sh|ch|tch|ts|ssh|(?:tt|kk|pp|ss|gg|bb|dd|zz|jj|ff)y?)([aeiou])\1*)$/;
+  return pieces.length >= 3 && pieces.every(piece => syllable.test(piece));
 }
 export function parseLyrics(text, mode = 'auto') {
   if (typeof text !== 'string' || !text.trim()) throw new Error('请先输入歌词。');
@@ -22,7 +36,7 @@ export function parseLyrics(text, mode = 'auto') {
     if (mode === 'paired') {
       if (!rows[i + 1] || /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(rows[i + 1])) throw new Error(`第 ${i + 1} 行后缺少参考罗马音，请检查输入格式。`);
       reference = rows[++i];
-    } else if (mode === 'auto' && /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(original) && rows[i + 1] && isSpacedRomaji(rows[i + 1])) {
+    } else if (mode === 'auto' && /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(original) && rows[i + 1] && isSpacedRomaji(rows[i + 1], original)) {
       reference = rows[++i];
     }
     lines.push({ id: lines.length + 1, original, reference });
