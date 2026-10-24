@@ -86,7 +86,7 @@ test('用户原始输入的全部参考罗马音均正确识别，含 tchi / tch
 });
 test('特殊读音括号与标点保留；校验拒绝漏句、改写、分词错位', () => {
   assert.equal(canonical('運命（さだめ）は 愛（いと）おしい'), '運命は愛おしい');
-  assert.equal(canonical('（ねぇ）'), '（ねぇ）');
+  assert.equal(canonical('（ねぇ）'), canonical('(ねぇ)'));
   assert.throws(() => validateAnalysis({ lines: sample.lines.slice(0, 32) }, parseLyrics(sampleText)), /遗漏/);
   const modified = structuredClone(sample); modified.lines[0].tokens[0].surface = '間違い';
   assert.throws(() => validateAnalysis(modified), /原词/);
@@ -194,6 +194,38 @@ test('紧凑输出可无损展开；参考读音不同的重复句不共用分�
   const plan = planAnalysis(parseLyrics('運命\nsa da me\n運命\nu n me i\n運命\nsa da me', 'paired'));
   assert.equal(plan.representatives.length, 2);
   assert.deepEqual(plan.sourceIds, [1, 2, 1]);
+});
+
+test('全角与半角标点按兼容字符校验，同时恢复原歌词标点', () => {
+  const expected = { id: 43, original: "Let's spread it out！  互い願ったまま" };
+  const row = { id: 43, t: '让我们传播开来，彼此怀着愿望。', w: [
+    { a: "Let's", r: 'lets', m: '让我们' },
+    { a: 'spread', r: 'spread', m: '传播' },
+    { a: 'it', r: 'it', m: '它' },
+    { a: 'out!', r: 'out', m: '开来' },
+    { a: '互い', r: 'tagai', m: '彼此' },
+    { a: '願（ねが）った', r: 'negatta', m: '祈愿' },
+    { a: 'まま', r: 'mama', m: '保持原样' }
+  ] };
+  const expanded = expandLine(row, expected);
+  assert.equal(expanded.original, expected.original);
+  assert.equal(expanded.tokens[3].annotated, 'out！');
+  assert.equal(expanded.tokens.map(token => token.surface).join(''), "Let'sspreaditout！互い願ったまま");
+  assert.equal(canonical(expected.original), canonical("Let's spread it out!互い願ったまま"));
+  assert.equal(canonical('「夢」、見る。'), canonical('"夢",見る.'));
+
+  const omittedMark = structuredClone(row);
+  omittedMark.w[3].a = 'out';
+  assert.throws(() => expandLine(omittedMark, expected), /字符|标点/);
+
+  const quoteExpected = { id: 44, original: '「夢」、見る。' };
+  const quoteRow = { id: 44, t: '看见梦。', w: [
+    { a: '"夢"', r: 'yume', m: '梦' },
+    { a: ',', r: 'comma', m: '、' },
+    { a: '見る.', r: 'miru', m: '看见' }
+  ] };
+  const quoteExpanded = expandLine(quoteRow, quoteExpected);
+  assert.deepEqual(quoteExpanded.tokens.map(token => token.annotated), ['「夢」', '、', '見る。']);
 });
 
 test('结构修复只重做无效句子，不回传上一份大段输出', async () => {
