@@ -12,6 +12,8 @@ let controller = null;
 let toastTimer;
 let saveTimer;
 let showSoramimi = false;
+let searchTimer;
+let searchSequence = 0;
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 function toast(message) {
@@ -44,6 +46,8 @@ function updateCount() {
     $('inputHint').textContent = text.trim() ? error.message : '逐句换行；副歌和重复句也请完整保留。';
   }
   updateBadge();
+  updateUploadControl();
+  updateAnalyzeButton();
 }
 function updateBadge() {
   const stale = state.data && ($('lyrics').value !== state.source || $('inputMode').value !== state.mode);
@@ -61,9 +65,21 @@ function render() {
   $('sheetTitle').textContent = state.title || (data ? '未命名的歌' : '你的下一首歌');
   $('sheetEyebrow').textContent = state.isSample ? 'A SONG TO BEGIN WITH' : 'YOUR LYRIC NOTEBOOK';
   const reuseLabel = state.savings?.reusedLines ? ` · 复用 ${state.savings.reusedLines} 句` : '';
-  $('sheetSubtitle').textContent = data ? `${data.lines.length} 句 · ${data.lines.reduce((n, l) => n + l.tokens.length, 0)} 个词格 · ${state.isSample ? '对话歌词完整示例' : state.model ? `由 ${state.model} 分析` : '已导入的分析'}${state.usage ? ` · ${usageLabel(state.usage)}${reuseLabel}` : ''}` : '从左侧输入歌词，开始读懂每一句。';
+  $('sheetSubtitle').textContent = data ? `${data.lines.length} 句 · ${data.lines.reduce((n, l) => n + l.tokens.length, 0)} 个词格 · ${state.libraryId ? '数据库中已审核收录' : state.isSample ? '对话歌词完整示例' : state.model ? `由 ${state.model} 分析` : '已导入的分析'}${state.usage ? ` · ${usageLabel(state.usage)}${reuseLabel}` : ''}` : '从左侧输入歌词，开始读懂每一句。';
   $('sheet').innerHTML = data ? data.lines.map(line => `<article class="lyric-card" aria-label="第 ${line.id} 句"><div class="line-number">${String(line.id).padStart(2, '0')}</div><div class="line-body"><div class="token-scroll" tabindex="0" role="region" aria-label="第 ${line.id} 句词格，长句可左右滚动"><div class="token-grid">${line.tokens.map(token => `<div class="token"><div class="token-romaji">${esc(token.romaji)}</div><div class="token-soramimi" lang="zh-CN">${esc(toSoramimi(token.romaji, token.surface))}</div><div class="token-original" lang="ja">${annotatedHTML(token.annotated)}</div><div class="token-meaning">${esc(token.meaning)}</div></div>`).join('')}</div></div><p class="sentence-translation">${esc(line.translation)}</p></div></article>`).join('') : '';
+  updateUploadControl();
   updateBadge();
+}
+function updateUploadControl() {
+  const data = state.data;
+  $('uploadControl').hidden = !data || state.isSample || Boolean(state.libraryId);
+  $('uploadBtn').disabled = Boolean(!data || state.uploadRequestId || $('lyrics').value !== state.source || $('inputMode').value !== state.mode);
+  $('uploadBtn').innerHTML = state.uploadRequestId ? '<svg><use href="#i-check"/></svg>已提交审核' : '<svg><use href="#i-book"/></svg>上传';
+}
+function updateAnalyzeButton() {
+  const libraryResultIsCurrent = Boolean(state.libraryId && state.data && $('lyrics').value === state.source && $('inputMode').value === state.mode);
+  $('analyzeBtn').disabled = Boolean(controller) || libraryResultIsCurrent;
+  $('analyzeBtn').querySelector('span').textContent = controller ? '正在逐句分析…' : libraryResultIsCurrent ? '已载入数据库结果' : '开始逐词分析';
 }
 function loadSample() {
   if (controller) return;
@@ -89,7 +105,7 @@ function busy(value) {
   $('cancelBtn').hidden = !value;
   $('analysisProgress').hidden = !value;
   $('analysisProgress').classList.remove('is-streaming');
-  $('analyzeBtn').querySelector('span').textContent = value ? '正在逐句分析…' : '开始逐句分析';
+  updateAnalyzeButton();
   $('workspace').setAttribute('aria-busy', String(value));
 }
 function updateConnection() {
@@ -108,6 +124,64 @@ function usageLabel(usage) {
   if (!usage.reportedRequests) return '服务商未返回用量';
   const total = usage.promptTokens + usage.completionTokens;
   return `${total.toLocaleString()} tokens${usage.reportedRequests < usage.requests ? '（部分用量）' : ''}`;
+}
+function hideSongSearch() {
+  $('songSearchResults').hidden = true;
+  $('songTitle').setAttribute('aria-expanded', 'false');
+}
+function showSongSearch(songs) {
+  const results = $('songSearchResults');
+  results.innerHTML = songs.map(song => `<button class="song-search-result" type="button" role="option" data-song-id="${Number(song.id)}"><span>${esc(song.title)}</span><small>${Number(song.lineCount)} 句</small></button>`).join('');
+  results.hidden = songs.length === 0;
+  $('songTitle').setAttribute('aria-expanded', String(songs.length > 0));
+}
+async function searchSongs(query) {
+  const sequence = ++searchSequence;
+  const prefix = query.trim();
+  if (!prefix) { showSongSearch([]); return; }
+  try {
+    const response = await fetch(`/api/songs?prefix=${encodeURIComponent(prefix)}`);
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || '歌曲搜索失败。');
+    if (sequence === searchSequence && $('songTitle').value.trim() === prefix) showSongSearch(value.songs || []);
+  } catch (error) {
+    if (sequence === searchSequence) { showSongSearch([]); status(error.message, true); }
+  }
+}
+async function loadLibrarySong(id) {
+  hideSongSearch();
+  status('正在载入数据库歌曲…');
+  try {
+    const response = await fetch(`/api/songs/${encodeURIComponent(id)}`);
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || '歌曲载入失败。');
+    const song = value.song;
+    const data = validateAnalysis(song.data);
+    const source = data.lines.map(line => line.original).join('\n');
+    $('songTitle').value = song.title;
+    $('lyrics').value = source;
+    $('inputMode').value = 'raw';
+    const expected = parseLyrics(source, 'raw');
+    const requestSignature = JSON.stringify([expected, config.baseUrl || serverStatus.baseUrl || '', config.model || serverStatus.model || '', config.format || serverStatus.format || 'json_schema']);
+    state = { data, title: song.title, source, mode: 'raw', isSample: false, model: '数据库收录', requestSignature, libraryId: song.id };
+    updateCount(); render(); persist();
+    status('已载入数据库中的审核歌曲，本次未调用模型。');
+  } catch (error) { status(error.message, true); }
+}
+async function submitUpload() {
+  const title = $('songTitle').value.trim();
+  if (!state.data || $('lyrics').value !== state.source || $('inputMode').value !== state.mode) { status('请先完成当前歌词的分析，再提交收录申请。', true); return; }
+  if (!title) { status('请填写歌曲官方原名后再提交。', true); $('songTitle').focus(); return; }
+  const button = $('uploadBtn');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/upload-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, data: state.data }) });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || '申请提交失败。');
+    state.title = title; state.uploadRequestId = value.id;
+    render(); persist();
+    status('收录申请已提交，审核通过后会出现在搜索结果中。');
+  } catch (error) { button.disabled = false; status(error.message, true); }
 }
 async function analyze() {
   if (controller) return;
@@ -199,7 +273,29 @@ $('cancelBtn').addEventListener('click', () => controller?.abort());
 for (const id of ['sampleBtn', 'emptySampleBtn']) $(id).addEventListener('click', () => { loadSample(); if (id === 'emptySampleBtn') $('sheetTitle').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 $('clearBtn').addEventListener('click', () => { $('lyrics').value = ''; updateCount(); persist(); $('lyrics').focus(); });
 for (const id of ['lyrics', 'inputMode']) $(id).addEventListener('input', () => { updateCount(); clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250); });
-$('songTitle').addEventListener('input', () => { if (state.data) { state.title = $('songTitle').value.trim(); $('sheetTitle').textContent = state.title || '未命名的歌'; } clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250); });
+$('songTitle').addEventListener('input', () => {
+  if (state.data) { state.title = $('songTitle').value.trim(); $('sheetTitle').textContent = state.title || '未命名的歌'; }
+  clearTimeout(searchTimer); searchTimer = setTimeout(() => searchSongs($('songTitle').value), 180);
+  clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250);
+});
+$('songTitle').addEventListener('focus', () => { if ($('songTitle').value.trim()) searchSongs($('songTitle').value); });
+$('songTitle').addEventListener('keydown', event => {
+  if (event.key === 'Escape') hideSongSearch();
+  if (event.key === 'ArrowDown' && !$('songSearchResults').hidden) { event.preventDefault(); $('songSearchResults').querySelector('button')?.focus(); }
+});
+$('songSearchResults').addEventListener('click', event => {
+  const option = event.target.closest('[data-song-id]');
+  if (option) loadLibrarySong(option.dataset.songId);
+});
+$('songSearchResults').addEventListener('keydown', event => {
+  const options = [...$('songSearchResults').querySelectorAll('[data-song-id]')];
+  const index = options.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown') { event.preventDefault(); options[Math.min(options.length - 1, index + 1)]?.focus(); }
+  if (event.key === 'ArrowUp') { event.preventDefault(); if (index <= 0) $('songTitle').focus(); else options[index - 1].focus(); }
+  if (event.key === 'Escape') { hideSongSearch(); $('songTitle').focus(); }
+});
+document.addEventListener('click', event => { if (!event.target.closest('.song-search')) hideSongSearch(); });
+$('uploadBtn').addEventListener('click', submitUpload);
 $('gridBtn').addEventListener('click', () => { setView(false); persist(); });
 $('cleanBtn').addEventListener('click', () => { setView(true); persist(); });
 $('fontSize').addEventListener('input', () => { document.documentElement.style.setProperty('--jp-size', `${$('fontSize').value}px`); persist(); });
@@ -310,6 +406,8 @@ function restore() {
     mode: savedMode,
     isSample: saved.isSample === true,
     model: typeof saved.model === 'string' ? saved.model.slice(0, 150) : '',
+    libraryId: Number.isSafeInteger(saved.libraryId) ? saved.libraryId : null,
+    uploadRequestId: Number.isSafeInteger(saved.uploadRequestId) ? saved.uploadRequestId : null,
     requestSignature: typeof saved.requestSignature === 'string' && savedData ? saved.requestSignature : '',
     usage: saved.usage && typeof saved.usage === 'object' ? saved.usage : null,
     savings: saved.savings && typeof saved.savings === 'object' ? saved.savings : null

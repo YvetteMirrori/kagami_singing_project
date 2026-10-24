@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>歌曲审核后台 · 日语小白唱见拯救计划</title>
+  <link rel="stylesheet" href="/admin.css">
+  <script type="module" src="/admin.mjs"></script>
+</head>
+<body>
+  <header class="admin-header">
+    <a href="/" class="admin-brand">日语小白唱见拯救计划 <span>歌曲审核</span></a>
+    <button id="logoutBtn" class="button secondary" type="button" hidden>退出登录</button>
+  </header>
+  <main class="admin-main">
+    <section id="loginPanel" class="login-panel" hidden>
+      <h1>后台登录</h1>
+      <form id="loginForm">
+        <label for="adminPassword">后台密码</label>
+        <input id="adminPassword" type="password" autocomplete="current-password" required>
+        <button class="button primary" type="submit">登录</button>
+      </form>
+      <p id="loginMessage" class="message" role="status"></p>
+    </section>
+    <section id="reviewPanel" hidden>
+      <div class="review-heading">
+        <div><h1>歌曲数据审核</h1><p id="reviewSummary"></p></div>
+        <button id="refreshBtn" type="button" class="button secondary">刷新</button>
+      </div>
+      <nav id="filters" class="filters" aria-label="申请状态">
+        <button type="button" data-status="pending" class="selected">待审核</button>
+        <button type="button" data-status="approved">已通过</button>
+        <button type="button" data-status="rejected">已拒绝</button>
+      </nav>
+      <p id="adminMessage" class="message" role="status"></p>
+      <div id="requestList" class="request-list"></div>
+    </section>
+  </main>
+</body>
+</html>

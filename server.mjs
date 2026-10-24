@@ -2,8 +2,10 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { parseLyrics, validateAnalysis } from './public/lib.mjs';
 import { compactSchema, expandLine, planAnalysis } from './analysis-wire.mjs';
+import { normalizeSongTitle, openDatabase } from './database.mjs';
 
 const root = new URL('./', import.meta.url);
 const prompt = await readFile(new URL('prompts/compact.txt', root), 'utf8');
@@ -16,18 +18,44 @@ const staticFiles = new Map([
   ['/soramimi.mjs', ['public/soramimi.mjs', 'text/javascript']],
   ['/soramimi-data.mjs', ['public/soramimi-data.mjs', 'text/javascript']],
   ['/sample.mjs', ['public/sample.mjs', 'text/javascript']]
+  ,['/admin/', ['public/admin.html', 'text/html']]
+  ,['/admin.css', ['public/admin.css', 'text/css']]
+  ,['/admin.mjs', ['public/admin.mjs', 'text/javascript']]
 ]);
 function sendJson(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(value));
 }
-async function readJson(req) {
+async function readJson(req, limit = 180000) {
   let body = '';
   for await (const chunk of req) {
     body += chunk;
-    if (Buffer.byteLength(body) > 180000) throw new Error('请求过大，请分段输入。');
+    if (Buffer.byteLength(body) > limit) throw new Error('请求过大，请分段输入。');
   }
   try { return JSON.parse(body); } catch { throw new Error('请求不是有效 JSON。'); }
+}
+function requestIp(req) {
+  const forwarded = req.headers['cf-connecting-ip'];
+  return (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+}
+function sameOrigin(req) {
+  if (typeof req.headers.origin !== 'string') return false;
+  try {
+    const origin = new URL(req.headers.origin);
+    return ['http:', 'https:'].includes(origin.protocol) && origin.host === req.headers.host;
+  } catch { return false; }
+}
+function parseCookies(header = '') {
+  return Object.fromEntries(header.split(';').map(piece => piece.trim().split(/=(.*)/s, 2)).filter(([key, value]) => key && value !== undefined));
+}
+function publicAnalysis(value) {
+  const validated = validateAnalysis(value);
+  return { lines: validated.lines.map(line => ({
+    id: line.id,
+    original: line.original,
+    translation: line.translation,
+    tokens: line.tokens.map(token => ({ surface: token.surface, annotated: token.annotated, romaji: token.romaji, meaning: token.meaning }))
+  })) };
 }
 export function resolveConfig(input = {}, env = process.env, local = true) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('模型设置无效。');
@@ -167,7 +195,12 @@ function isLocalRequest(req) {
 }
 
 export function createApp({ env = process.env, fetcher = fetch } = {}) {
+  if (env.NODE_ENV === 'production' && !env.DATABASE_PATH) throw new Error('生产环境必须配置 DATABASE_PATH。');
+  const db = openDatabase(env.DATABASE_PATH || ':memory:');
   const visitors = new Map();
+  const uploadAttempts = new Map();
+  const loginAttempts = new Map();
+  const adminSessions = new Map();
   const cache = new Map();
   let cacheBytes = 0;
   const remember = (key, line) => {
@@ -180,12 +213,13 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
     }
   };
   let running = 0;
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (req.method === 'GET' && pathname === '/admin') { res.writeHead(308, { Location: '/admin/' }); res.end(); return; }
     if (req.method === 'GET' && staticFiles.has(pathname)) {
       const [file, type] = staticFiles.get(pathname);
       try { const bytes = await readFile(new URL(file, root)); res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` }); res.end(bytes); }
@@ -195,6 +229,108 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
     if (req.method === 'GET' && pathname === '/api/status') {
       const local = isLocalRequest(req);
       sendJson(res, 200, { configured: Boolean(env.OPENAI_API_KEY), model: env.OPENAI_MODEL || 'gpt-6-astra', baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', local, format: env.LLM_OUTPUT_MODE || 'json_schema' }); return;
+    }
+    if (req.method === 'GET' && pathname === '/api/songs') {
+      const prefix = new URL(req.url, 'http://localhost').searchParams.get('prefix')?.trim() || '';
+      if (!prefix || prefix.length > 120) { sendJson(res, 200, { songs: [] }); return; }
+      const key = normalizeSongTitle(prefix).replace(/[\\%_]/g, '\\$&');
+      const songs = db.prepare("SELECT id, title, line_count AS lineCount FROM songs WHERE title_key LIKE ? ESCAPE '\\' ORDER BY title_key LIMIT 10").all(`${key}%`);
+      sendJson(res, 200, { songs }); return;
+    }
+    const songMatch = pathname.match(/^\/api\/songs\/(\d+)$/);
+    if (req.method === 'GET' && songMatch) {
+      const song = db.prepare('SELECT id, title, data FROM songs WHERE id = ?').get(Number(songMatch[1]));
+      if (!song) { sendJson(res, 404, { error: '没有找到这首已审核歌曲。' }); return; }
+      sendJson(res, 200, { song: { id: song.id, title: song.title, data: JSON.parse(song.data) } }); return;
+    }
+    if (req.method === 'POST' && pathname === '/api/upload-requests') {
+      if (!sameOrigin(req)) { sendJson(res, 403, { error: '只允许从本站提交上传申请。' }); return; }
+      if (!req.headers['content-type']?.startsWith('application/json')) { sendJson(res, 415, { error: '请使用 JSON 请求。' }); return; }
+      const now = Date.now(), ip = requestIp(req);
+      for (const [key, value] of uploadAttempts) if (now - value.started > 3600000) uploadAttempts.delete(key);
+      const entry = uploadAttempts.get(ip) || { started: now, count: 0 };
+      if (entry.count >= 5) { sendJson(res, 429, { error: '上传申请较多，请一小时后重试。' }); return; }
+      entry.count++; uploadAttempts.set(ip, entry);
+      try {
+        const input = await readJson(req, 2000000);
+        const title = typeof input.title === 'string' ? input.title.normalize('NFKC').trim().replace(/\s+/gu, ' ') : '';
+        if (!title || title.length > 120) throw new Error('请填写有效的歌曲官方原名（最多 120 个字符）。');
+        const data = publicAnalysis(input.data);
+        const encoded = JSON.stringify(data);
+        if (Buffer.byteLength(encoded) > 1800000) throw new Error('翻译数据过大，暂时无法提交。');
+        const titleKey = normalizeSongTitle(title);
+        if (db.prepare('SELECT 1 FROM songs WHERE title_key = ?').get(titleKey)) { sendJson(res, 409, { error: '数据库中已有这首歌，可直接搜索使用。' }); return; }
+        if (db.prepare("SELECT 1 FROM upload_requests WHERE title_key = ? AND status = 'pending'").get(titleKey)) { sendJson(res, 409, { error: '这首歌已有一条待审核申请。' }); return; }
+        const result = db.prepare('INSERT INTO upload_requests(title, title_key, data, line_count, submitted_at) VALUES(?, ?, ?, ?, ?)').run(title, titleKey, encoded, data.lines.length, new Date().toISOString());
+        sendJson(res, 201, { id: Number(result.lastInsertRowid), status: 'pending' });
+      } catch (error) { sendJson(res, 400, { error: error.message || '申请提交失败。' }); }
+      return;
+    }
+    if (pathname.startsWith('/api/admin/')) {
+      const sessionCookie = parseCookies(req.headers.cookie).kagami_admin || '';
+      const sessionKey = createHash('sha256').update(sessionCookie).digest('hex');
+      let session = adminSessions.get(sessionKey);
+      if (session && session.expires <= Date.now()) { adminSessions.delete(sessionKey); session = null; }
+      if (req.method === 'GET' && pathname === '/api/admin/session') { sendJson(res, 200, { authenticated: Boolean(session) }); return; }
+      if (req.method === 'POST' && pathname === '/api/admin/login') {
+        if (!sameOrigin(req)) { sendJson(res, 403, { error: '登录请求来源无效。' }); return; }
+        if (typeof env.ADMIN_PASSWORD !== 'string' || !env.ADMIN_PASSWORD) { sendJson(res, 503, { error: '后台密码尚未在服务器配置。' }); return; }
+        const now = Date.now(), ip = requestIp(req);
+        for (const [key, value] of loginAttempts) if (now - value.started > 900000) loginAttempts.delete(key);
+        const entry = loginAttempts.get(ip) || { started: now, count: 0 };
+        if (entry.count >= 8) { sendJson(res, 429, { error: '登录尝试过多，请 15 分钟后重试。' }); return; }
+        let input;
+        try { input = await readJson(req, 4096); } catch (error) { sendJson(res, 400, { error: error.message }); return; }
+        entry.count++;
+        const provided = createHash('sha256').update(typeof input.password === 'string' ? input.password : '').digest();
+        const expected = createHash('sha256').update(env.ADMIN_PASSWORD).digest();
+        if (!timingSafeEqual(provided, expected)) { loginAttempts.set(ip, entry); sendJson(res, 401, { error: '后台密码不正确。' }); return; }
+        loginAttempts.delete(ip);
+        const token = randomBytes(32).toString('base64url');
+        adminSessions.set(createHash('sha256').update(token).digest('hex'), { expires: now + 28800000 });
+        const secure = req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https' || String(req.headers['cf-visitor'] || '').includes('https');
+        res.setHeader('Set-Cookie', `kagami_admin=${token}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=28800${secure ? '; Secure' : ''}`);
+        sendJson(res, 200, { authenticated: true }); return;
+      }
+      if (req.method === 'POST' && pathname === '/api/admin/logout') {
+        if (!sameOrigin(req)) { sendJson(res, 403, { error: '请求来源无效。' }); return; }
+        if (session) adminSessions.delete(sessionKey);
+        res.setHeader('Set-Cookie', 'kagami_admin=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0');
+        sendJson(res, 200, { authenticated: false }); return;
+      }
+      if (!session) { sendJson(res, 401, { error: '请先登录后台。' }); return; }
+      session.expires = Date.now() + 28800000;
+      if (req.method === 'GET' && pathname === '/api/admin/requests') {
+        const status = new URL(req.url, 'http://localhost').searchParams.get('status') || 'pending';
+        if (!['pending', 'approved', 'rejected'].includes(status)) { sendJson(res, 400, { error: '申请状态无效。' }); return; }
+        const requests = db.prepare('SELECT id, title, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, data FROM upload_requests WHERE status = ? ORDER BY submitted_at DESC LIMIT 100').all(status).map(row => ({ ...row, data: JSON.parse(row.data) }));
+        sendJson(res, 200, { requests }); return;
+      }
+      const reviewMatch = pathname.match(/^\/api\/admin\/requests\/(\d+)\/(approve|reject)$/);
+      if (req.method === 'POST' && reviewMatch) {
+        if (!sameOrigin(req)) { sendJson(res, 403, { error: '审核请求来源无效。' }); return; }
+        const id = Number(reviewMatch[1]), action = reviewMatch[2];
+        const request = db.prepare('SELECT id, title, title_key, data, line_count, status FROM upload_requests WHERE id = ?').get(id);
+        if (!request || request.status !== 'pending') { sendJson(res, 404, { error: '待审核申请不存在或已处理。' }); return; }
+        let note = '';
+        try { const input = await readJson(req, 4096); note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''; }
+        catch (error) { sendJson(res, 400, { error: error.message }); return; }
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const reviewedAt = new Date().toISOString();
+          if (action === 'approve') {
+            db.prepare('INSERT INTO songs(title, title_key, data, line_count, created_at) VALUES(?, ?, ?, ?, ?)').run(request.title, request.title_key, request.data, request.line_count, reviewedAt);
+          }
+          db.prepare('UPDATE upload_requests SET status = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND status = ?').run(action === 'approve' ? 'approved' : 'rejected', reviewedAt, note, id, 'pending');
+          db.exec('COMMIT');
+          sendJson(res, 200, { status: action === 'approve' ? 'approved' : 'rejected' });
+        } catch (error) {
+          db.exec('ROLLBACK');
+          sendJson(res, error.code === 'ERR_SQLITE_ERROR' ? 409 : 400, { error: action === 'approve' ? '歌曲无法加入数据库，可能已被审核收录。' : '审核操作失败。' });
+        }
+        return;
+      }
+      sendJson(res, 404, { error: '后台接口不存在。' }); return;
     }
     if (req.method !== 'POST' || pathname !== '/api/analyze') { sendJson(res, 404, { error: '页面不存在。' }); return; }
     if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) {
@@ -206,8 +342,7 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
     for (const [key, entry] of visitors) if (now - entry.start > 600000) visitors.delete(key);
     // Cloudflare Tunnel connects through loopback, so the socket address is
     // shared by every visitor. Use the edge-provided client IP for per-user limits.
-    const forwardedIp = req.headers['cf-connecting-ip'];
-    const ip = (typeof forwardedIp === 'string' ? forwardedIp.split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+    const ip = requestIp(req);
     const entry = visitors.get(ip) || { start: now, count: 0 };
     if (entry.count >= 20) { sendJson(res, 429, { error: '分析次数较多，请十分钟后重试。' }); return; }
     entry.count++; visitors.set(ip, entry);
@@ -282,6 +417,8 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
       }
     } finally { running--; }
   });
+  server.on('close', () => db.close());
+  return server;
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const host = process.env.HOST || '127.0.0.1';
