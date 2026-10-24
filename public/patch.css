@@ -21,6 +21,18 @@
 .soramimi-toggle.selected { background: #f3eadc; color: #80593c; border-color: #d9c2a4; }
 .legend-soramimi { background: #8b6548; }
 .reading-toolbar { flex-wrap: wrap; row-gap: 10px; }
+.intro-note-text { display: block; }
+.intro-credit { display: flex !important; align-items: center; gap: 3px; white-space: nowrap; }
+.copy-qq-button { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 2px; color: inherit; border: 0; border-radius: 3px; }
+.copy-qq-button svg { width: 12px; height: 12px; }
+.copy-qq-button:hover { color: var(--accent); background: #eee9dd; }
+
+@media (max-width: 850px) {
+  .intro { flex-direction: column; align-items: flex-start; }
+  .intro-note { display: flex; margin-top: 17px; padding-right: 0; gap: 0; font-size: 11px; }
+  .intro-note .note-symbol { display: none; }
+  .intro-note small { font-size: 10px; margin-top: 6px; }
+}
 
 .token {
   grid-template-rows: 35px minmax(44px, auto) 29px;

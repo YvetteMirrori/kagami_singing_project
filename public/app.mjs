@@ -213,6 +213,10 @@ $('copyBtn').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(toFourLines(state.data)); toast('已复制全部句子的四行文本。'); }
   catch { toast('浏览器不允许复制，请使用「导出 → TXT」。'); }
 });
+$('copyQqBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText('2839023899'); toast('QQ 号已复制。'); }
+  catch { toast('复制失败，请手动复制 QQ 号：2839023899'); }
+});
 for (const [button, dialog] of [['settingsBtn', 'settingsDialog'], ['guideBtn', 'guideDialog'], ['exportBtn', 'exportDialog']]) $(button).addEventListener('click', () => $(dialog).showModal());
 document.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => {

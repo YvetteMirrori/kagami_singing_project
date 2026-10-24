@@ -41,7 +41,7 @@ test('保留外语词格；转换不改变原罗马音或分词数据', () => {
   assert.deepEqual(tokens.map(token => token.romaji), ['watashi', 'wa', 'suki']);
 });
 
-test('空耳与规则模块能直接由网站提供，不调用模型服务', async t => {
+test('网站提供空耳规则和署名复制按钮，不调用模型服务', async t => {
   let modelRequests = 0;
   const server = createApp({ env: {}, fetcher: async () => { modelRequests++; throw new Error('Unexpected model request'); } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -52,9 +52,13 @@ test('空耳与规则模块能直接由网站提供，不调用模型服务', as
   const html = await page.text();
   assert.match(html, /id="soramimiBtn"/);
   assert.match(html, /id="soramimiLegend"/);
+  assert.match(html, /制作：关镜兮Kagami qq：2839023899/);
+  assert.match(html, /id="copyQqBtn"[^>]+aria-label="复制 QQ 号 2839023899"/);
   const app = await fetch(base + '/app.mjs');
   assert.equal(app.status, 200);
-  assert.match(await app.text(), /showSoramimi/);
+  const appText = await app.text();
+  assert.match(appText, /showSoramimi/);
+  assert.match(appText, /\$\('copyQqBtn'\)\.addEventListener\('click'.*?writeText\('2839023899'\)/s);
   for (const path of ['/soramimi.mjs', '/soramimi-data.mjs']) {
     const response = await fetch(base + path);
     assert.equal(response.status, 200);
