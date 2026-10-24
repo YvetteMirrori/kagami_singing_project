@@ -1,5 +1,6 @@
 import { parseLyrics, validateAnalysis, toFourLines } from './lib.mjs';
 import { sample, sampleText, sampleTitle } from './sample.mjs';
+import { toSoramimi } from './soramimi.mjs';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'nihongo-kobito-uta-v2';
@@ -10,6 +11,7 @@ let serverStatus = { local: true, configured: false };
 let controller = null;
 let toastTimer;
 let saveTimer;
+let showSoramimi = false;
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 function toast(message) {
@@ -25,7 +27,7 @@ function persist() {
   try {
     localStorage.setItem(storageKey, JSON.stringify({
       input: $('lyrics').value, title: $('songTitle').value, mode: $('inputMode').value,
-      state, config, view: $('cleanBtn').classList.contains('selected') ? 'clean' : 'grid', fontSize: $('fontSize').value
+      state, config, view: $('cleanBtn').classList.contains('selected') ? 'clean' : 'grid', fontSize: $('fontSize').value, showSoramimi
     }));
   } catch { $('storageLabel')?.remove(); toast('浏览器未能保存这次修改，请导出 JSON 留存。'); }
 }
@@ -60,7 +62,7 @@ function render() {
   $('sheetEyebrow').textContent = state.isSample ? 'A SONG TO BEGIN WITH' : 'YOUR LYRIC NOTEBOOK';
   const reuseLabel = state.savings?.reusedLines ? ` · 复用 ${state.savings.reusedLines} 句` : '';
   $('sheetSubtitle').textContent = data ? `${data.lines.length} 句 · ${data.lines.reduce((n, l) => n + l.tokens.length, 0)} 个词格 · ${state.isSample ? '对话歌词完整示例' : state.model ? `由 ${state.model} 分析` : '已导入的分析'}${state.usage ? ` · ${usageLabel(state.usage)}${reuseLabel}` : ''}` : '从左侧输入歌词，开始读懂每一句。';
-  $('sheet').innerHTML = data ? data.lines.map(line => `<article class="lyric-card" aria-label="第 ${line.id} 句"><div class="line-number">${String(line.id).padStart(2, '0')}</div><div class="line-body"><div class="token-scroll" tabindex="0" role="region" aria-label="第 ${line.id} 句词格，长句可左右滚动"><div class="token-grid">${line.tokens.map(token => `<div class="token"><div class="token-romaji">${esc(token.romaji)}</div><div class="token-original" lang="ja">${annotatedHTML(token.annotated)}</div><div class="token-meaning">${esc(token.meaning)}</div></div>`).join('')}</div></div><p class="sentence-translation">${esc(line.translation)}</p></div></article>`).join('') : '';
+  $('sheet').innerHTML = data ? data.lines.map(line => `<article class="lyric-card" aria-label="第 ${line.id} 句"><div class="line-number">${String(line.id).padStart(2, '0')}</div><div class="line-body"><div class="token-scroll" tabindex="0" role="region" aria-label="第 ${line.id} 句词格，长句可左右滚动"><div class="token-grid">${line.tokens.map(token => `<div class="token"><div class="token-romaji">${esc(token.romaji)}</div><div class="token-soramimi" lang="zh-CN">${esc(toSoramimi(token.romaji, token.surface))}</div><div class="token-original" lang="ja">${annotatedHTML(token.annotated)}</div><div class="token-meaning">${esc(token.meaning)}</div></div>`).join('')}</div></div><p class="sentence-translation">${esc(line.translation)}</p></div></article>`).join('') : '';
   updateBadge();
 }
 function loadSample() {
@@ -73,6 +75,14 @@ function setView(clean) {
   $('sheet').classList.toggle('clean-view', clean);
   $('cleanBtn').classList.toggle('selected', clean); $('gridBtn').classList.toggle('selected', !clean);
   $('cleanBtn').setAttribute('aria-pressed', String(clean)); $('gridBtn').setAttribute('aria-pressed', String(!clean));
+}
+function setSoramimi(visible) {
+  showSoramimi = visible;
+  $('sheet').classList.toggle('show-soramimi', visible);
+  $('soramimiBtn').classList.toggle('selected', visible);
+  $('soramimiBtn').setAttribute('aria-pressed', String(visible));
+  $('soramimiBtn').setAttribute('aria-label', visible ? '隐藏中文空耳' : '显示中文空耳');
+  $('soramimiLegend').hidden = !visible;
 }
 function busy(value) {
   for (const id of ['analyzeBtn', 'sampleBtn', 'emptySampleBtn', 'clearBtn', 'importBtn', 'lyrics', 'songTitle', 'inputMode', 'settingsBtn']) $(id).disabled = value;
@@ -193,6 +203,7 @@ $('songTitle').addEventListener('input', () => { if (state.data) { state.title =
 $('gridBtn').addEventListener('click', () => { setView(false); persist(); });
 $('cleanBtn').addEventListener('click', () => { setView(true); persist(); });
 $('fontSize').addEventListener('input', () => { document.documentElement.style.setProperty('--jp-size', `${$('fontSize').value}px`); persist(); });
+$('soramimiBtn').addEventListener('click', () => { setSoramimi(!showSoramimi); persist(); });
 $('focusBtn').addEventListener('click', () => {
   const focus = document.body.classList.toggle('focus-mode');
   $('focusBtn').setAttribute('aria-pressed', String(focus)); $('focusBtn').setAttribute('aria-label', focus ? '退出专注阅读' : '专注阅读');
@@ -225,7 +236,7 @@ $('settingsForm').addEventListener('submit', event => {
   toast('模型设置已保存。点击「开始逐句分析」使用。');
 });
 $('forgetKeyBtn').addEventListener('click', () => { config.apiKey = ''; $('apiKey').value = ''; persist(); updateConnection(); toast('已清除本机保存的密钥。'); });
-$('exportJsonBtn').addEventListener('click', () => { if (state.data) download(`${safeName()}.json`, JSON.stringify({ version: 1, title: state.title, source: state.source, mode: state.mode, isSample: state.isSample, model: state.model, ...state.data }, null, 2), 'application/json;charset=utf-8'); });
+$('exportJsonBtn').addEventListener('click', () => { if (state.data) download(`${safeName()}.json`, JSON.stringify({ version: 1, title: state.title, source: state.source, mode: state.mode, isSample: state.isSample, model: state.model, showSoramimi, ...state.data }, null, 2), 'application/json;charset=utf-8'); });
 $('exportTextBtn').addEventListener('click', () => { if (state.data) download(`${safeName()}.txt`, toFourLines(state.data), 'text/plain;charset=utf-8'); });
 $('printBtn').addEventListener('click', () => { $('exportDialog').close(); window.print(); });
 $('importBtn').addEventListener('click', () => $('importFile').click());
@@ -239,6 +250,7 @@ $('importFile').addEventListener('change', async event => {
     const mode = ['raw', 'paired', 'auto'].includes(value.mode) ? value.mode : 'raw';
     validateAnalysis(data, parseLyrics(source, mode));
     state = { data: { lines: data.lines }, title: typeof value.title === 'string' ? value.title.slice(0, 120) : file.name.replace(/\.json$/i, ''), source, mode, isSample: value.isSample === true, model: typeof value.model === 'string' ? value.model.slice(0, 150) : '' };
+    setSoramimi(value.showSoramimi === true);
     $('lyrics').value = source; $('songTitle').value = state.title; $('inputMode').value = mode;
     updateCount(); render(); persist(); status(`已导入 ${data.lines.length} 句完整分析。`); toast('分析已导入。');
   } catch (error) { toast(`导入失败：${error.message}`); }
@@ -310,6 +322,7 @@ function restore() {
   const size = Math.max(17, Math.min(27, Number(value.fontSize) || 21));
   $('fontSize').value = size; document.documentElement.style.setProperty('--jp-size', `${size}px`);
   setView(value.view === 'clean');
+  setSoramimi(value.showSoramimi === true);
   if (foundKey !== storageKey) {
     try { localStorage.setItem(storageKey, JSON.stringify({ ...value, state })); }
     catch { /* The legacy save remains untouched if the browser is out of space. */ }

@@ -44,6 +44,23 @@ node --env-file-if-exists=.env server.mjs
 - 失败或取消保留之前的完整结果，不以半份结果覆盖。
 - 可切换格子 / 简洁视图、调字号、专注阅读、复制四行文本、导入导出 JSON、导出 TXT、浏览器打印 PDF。全部重复句参与导出。
 
+## 中文空耳（1.1.0）
+
+点击阅读工具栏的「空耳」可一键显示或隐藏，默认关闭，刷新后保留选择。空耳位于罗马音下方、原词上方，与原来的每个分词格共用宽度；字号随原词调整，介于罗马音和原词之间。打印也遵循当前开关状态。
+
+转换完全在浏览器内完成，不调用模型、不新增 token 或费用，已有分析和导入 JSON 可直接显示。复制和 TXT 保持原约定的四行结构。
+
+规则来自项目内的 `五十音转空耳对照表.xlsx`，没有自行补充中文读音。`ki`、`ke`、`hi`、表内的 `gi` 及无中文对应的拗音保持罗马音；不认识的拼写、外语歌词和促音标记也保留。比如 `watashi` → `哇它西`，`kya` → `kya`。
+
+更新 Excel 后，运行以下命令重新生成静态规则（Python 仅用标准库），再运行测试：
+
+```powershell
+python scripts/build-soramimi.py
+node --test
+```
+
+`public/soramimi-data.mjs` 记录映射及源文件 SHA-256，`public/soramimi.mjs` 负责本地转换。版本变化见 `CHANGELOG.md`。
+
 ## 项目文件
 
 ```text
@@ -52,17 +69,22 @@ public/styles.css       电脑、手机与打印样式
 public/app.mjs          前端交互、存储、流式进度与导出
 public/lib.mjs          输入解析、JSON 结构、原文一致性校验
 public/sample.mjs       本对话完整 33 句示例
+public/soramimi.mjs     浏览器内五十音空耳转换规则
+public/soramimi-data.mjs 从用户对照表生成的静态映射及源哈希
+五十音转空耳对照表.xlsx 空耳映射的唯一来源
+scripts/build-soramimi.py 更新对照表后重新生成静态映射
 prompts/system.txt      已落实本对话约定的模型 system prompt
 server.mjs              静态页面与模型接口，无第三方依赖
-docs/需求约定.md         本项目长期保留的需求记录
-tests/analysis.test.mjs  输入、重复句、分词校验及模拟接口测试
+docs/需求约定.md        本项目长期保留的需求记录
+tests/analysis.test.mjs 输入、重复句、分词校验及模拟接口测试
+tests/soramimi.test.mjs 空耳转换、来源完整性与零模型请求测试
 .work/                  开发验证记录与测试样例
 ```
 
 ## 测试
 
 ```powershell
-node --test tests/analysis.test.mjs
+node --test
 ```
 
 官方接口参考：<https://developers.openai.com/api/docs/guides/structured-outputs>。实现使用文档中的 Chat Completions `response_format.json_schema`，并额外提供兼容模式。

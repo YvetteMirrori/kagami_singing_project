@@ -13,6 +13,8 @@ const staticFiles = new Map([
   ['/patch.css', ['public/patch.css', 'text/css']],
   ['/app.mjs', ['public/app.mjs', 'text/javascript']],
   ['/lib.mjs', ['public/lib.mjs', 'text/javascript']],
+  ['/soramimi.mjs', ['public/soramimi.mjs', 'text/javascript']],
+  ['/soramimi-data.mjs', ['public/soramimi-data.mjs', 'text/javascript']],
   ['/sample.mjs', ['public/sample.mjs', 'text/javascript']]
 ]);
 function sendJson(res, status, value) {
