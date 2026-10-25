@@ -172,3 +172,6 @@
 .library-song > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-song > small { flex: none; color: var(--muted); font-size: 11px; }
 .library-modal > .field-help { margin-top: 12px; }
+
+.guide-workflow { list-style: none; padding-left: 0; }
+.guide-workflow li { padding-left: 0; }
