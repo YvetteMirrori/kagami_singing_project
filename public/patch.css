@@ -163,3 +163,12 @@
 @media print {
   .song-search-results, .upload-control { display: none !important; }
 }
+
+.library-modal { width: min(560px, calc(100% - 32px)); }
+.library-list { margin: 0; padding: 0; list-style: none; max-height: min(50dvh, 420px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 6px; }
+.library-list li + li { border-top: 1px solid var(--line); }
+.library-song { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 48px; padding: 12px 14px; text-align: left; font-size: 13px; }
+.library-song:hover, .library-song:focus-visible { background: #f1f2ec; }
+.library-song > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-song > small { flex: none; color: var(--muted); font-size: 11px; }
+.library-modal > .field-help { margin-top: 12px; }

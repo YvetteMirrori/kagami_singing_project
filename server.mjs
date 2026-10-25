@@ -233,6 +233,10 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
       const local = isLocalRequest(req);
       sendJson(res, 200, { configured: Boolean(env.OPENAI_API_KEY), model: env.OPENAI_MODEL || 'gpt-6-astra', baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', local, format: env.LLM_OUTPUT_MODE || 'json_schema' }); return;
     }
+    if (req.method === 'GET' && pathname === '/api/library') {
+      const songs = db.prepare('SELECT id, title, line_count AS lineCount FROM songs ORDER BY title_key, id').all();
+      sendJson(res, 200, { songs }); return;
+    }
     if (req.method === 'GET' && pathname === '/api/songs') {
       const prefix = new URL(req.url, 'http://localhost').searchParams.get('prefix')?.trim() || '';
       if (!prefix || prefix.length > 120) { sendJson(res, 200, { songs: [] }); return; }

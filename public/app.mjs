@@ -14,6 +14,8 @@ let saveTimer;
 let showSoramimi = false;
 let searchTimer;
 let searchSequence = 0;
+let librarySequence = 0;
+let librarySelecting = false;
 let uploading = false;
 let uploadConfirmed = false;
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -107,7 +109,7 @@ function setSoramimi(visible) {
   $('soramimiLegend').hidden = !visible;
 }
 function busy(value) {
-  for (const id of ['analyzeBtn', 'sampleBtn', 'emptySampleBtn', 'clearBtn', 'importBtn', 'lyrics', 'songTitle', 'inputMode', 'settingsBtn']) $(id).disabled = value;
+  for (const id of ['analyzeBtn', 'sampleBtn', 'emptySampleBtn', 'clearBtn', 'importBtn', 'lyrics', 'songTitle', 'inputMode', 'settingsBtn', 'libraryBtn']) $(id).disabled = value;
   $('cancelBtn').hidden = !value;
   $('analysisProgress').hidden = !value;
   $('analysisProgress').classList.remove('is-streaming');
@@ -155,6 +157,26 @@ async function searchSongs(query) {
     if (sequence === searchSequence) { showSongSearch([]); status(error.message, true); }
   }
 }
+async function openLibrary() {
+  const sequence = ++librarySequence;
+  $('libraryDialog').showModal();
+  $('libraryList').hidden = true;
+  $('libraryList').innerHTML = '';
+  $('libraryStatus').textContent = '正在读取曲库…';
+  try {
+    const response = await fetch('/api/library', { signal: AbortSignal.timeout(15000) });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || '曲库载入失败，请重试。');
+    if (sequence !== librarySequence) return;
+    const songs = value.songs;
+    if (!Array.isArray(songs)) throw new Error('曲库载入失败，请重试。');
+    $('libraryList').innerHTML = songs.map(song => `<li><button class="library-song" type="button" data-library-id="${Number(song.id)}"><span title="${esc(song.title)}">${esc(song.title)}</span><small>${Number(song.lineCount)} 句</small></button></li>`).join('');
+    $('libraryList').hidden = !songs.length;
+    $('libraryStatus').textContent = songs.length ? `共 ${songs.length} 首已收录歌曲` : '曲库暂无已审核歌曲。';
+  } catch (error) {
+    if (sequence === librarySequence) $('libraryStatus').textContent = error.name === 'TimeoutError' ? '曲库读取超时，请关闭后重试。' : error.message;
+  }
+}
 async function loadLibrarySong(id) {
   hideSongSearch();
   status('正在载入数据库歌曲…');
@@ -173,7 +195,8 @@ async function loadLibrarySong(id) {
     state = { data, title: song.title, source, mode: 'raw', isSample: false, model: '数据库收录', requestSignature, libraryId: song.id };
     updateCount(); render(); persist();
     status('已载入数据库中的审核歌曲，本次未调用模型。');
-  } catch (error) { status(error.message, true); }
+    return true;
+  } catch (error) { status(error.message, true); return false; }
 }
 async function submitUpload() {
   if (uploading) return;
@@ -330,6 +353,18 @@ $('songSearchResults').addEventListener('keydown', event => {
   if (event.key === 'Escape') { hideSongSearch(); $('songTitle').focus(); }
 });
 document.addEventListener('click', event => { if (!event.target.closest('.song-search')) hideSongSearch(); });
+$('libraryBtn').addEventListener('click', openLibrary);
+$('libraryList').addEventListener('click', async event => {
+  const button = event.target.closest('[data-library-id]');
+  if (!button || librarySelecting || controller) return;
+  librarySelecting = true;
+  button.disabled = true;
+  $('libraryStatus').textContent = '正在载入歌曲…';
+  try {
+    if (await loadLibrarySong(button.dataset.libraryId)) $('libraryDialog').close();
+    else $('libraryStatus').textContent = '歌曲载入失败，请重试。';
+  } finally { librarySelecting = false; button.disabled = false; }
+});
 $('uploadBtn').addEventListener('click', submitUpload);
 $('gridBtn').addEventListener('click', () => { setView(false); persist(); });
 $('cleanBtn').addEventListener('click', () => { setView(true); persist(); });

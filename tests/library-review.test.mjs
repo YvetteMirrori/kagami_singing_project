@@ -26,6 +26,7 @@ test('song submissions stay private until admin approval, then become searchable
   const request = (path, options = {}) => fetch(`${origin}${path}`, options);
   const headers = { Origin: origin, 'Content-Type': 'application/json' };
 
+  assert.deepEqual((await (await request('/api/library')).json()).songs, []);
   assert.deepEqual((await (await request('/api/songs?prefix=猫')).json()).songs, []);
   const submitted = await request('/api/upload-requests', { method: 'POST', headers, body: JSON.stringify({ title: '猫の歌', data: analysis }) });
   const submittedValue = await submitted.json();
@@ -57,6 +58,8 @@ test('song submissions stay private until admin approval, then become searchable
   assert.equal(songs[0].title, '猫の歌');
   const loaded = await request(`/api/songs/${songs[0].id}`);
   assert.deepEqual((await loaded.json()).song.data, analysis);
+  const library = (await (await request('/api/library')).json()).songs;
+  assert.deepEqual(library, [{ id: songs[0].id, title: '猫の歌', lineCount: 1 }]);
   assert.equal(modelCalls, 0);
 });
 
@@ -73,4 +76,33 @@ test('admin login rejects a wrong password and does not issue a session cookie',
   });
   assert.equal(response.status, 401);
   assert.equal(response.headers.get('set-cookie'), null);
+});
+
+
+test('曲库列出全部已审核歌曲，超过搜索的十首限制且不公开待审核数据', async t => {
+  let modelCalls = 0;
+  const app = createApp({ env: { DATABASE_PATH: ':memory:', ADMIN_PASSWORD: 'test-password' }, fetcher: async () => { modelCalls++; throw new Error('unexpected model request'); } });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { app.closeAllConnections(); app.close(resolve); }));
+  const origin = `http://127.0.0.1:${app.address().port}`;
+  const headers = { Origin: origin, 'Content-Type': 'application/json' };
+  const login = await fetch(`${origin}/api/admin/login`, { method: 'POST', headers, body: JSON.stringify({ password: 'test-password' }) });
+  const cookie = login.headers.get('set-cookie').split(';', 1)[0];
+  for (let i = 12; i >= 0; i--) {
+    const submitted = await fetch(`${origin}/api/upload-requests`, { method: 'POST', headers: { ...headers, 'CF-Connecting-IP': `192.0.2.${i + 1}` }, body: JSON.stringify({ title: `曲目${String(i).padStart(2, '0')}`, data: analysis }) });
+    assert.equal(submitted.status, 201);
+    const { id } = await submitted.json();
+    if (i === 0) continue;
+    const reviewed = await fetch(`${origin}/api/admin/requests/${id}/approve`, { method: 'POST', headers: { ...headers, Cookie: cookie }, body: '{}' });
+    assert.equal(reviewed.status, 200);
+  }
+  const library = await fetch(`${origin}/api/library`);
+  assert.equal(library.status, 200);
+  const songs = (await library.json()).songs;
+  assert.equal(songs.length, 12);
+  assert.deepEqual(songs.map(song => song.title), Array.from({ length: 12 }, (_, i) => `曲目${String(i + 1).padStart(2, '0')}`));
+  assert.ok(songs.every(song => song.lineCount === 1 && !('data' in song)));
+  const loaded = await fetch(`${origin}/api/songs/${songs[0].id}`);
+  assert.deepEqual((await loaded.json()).song.data, analysis);
+  assert.equal(modelCalls, 0);
 });
