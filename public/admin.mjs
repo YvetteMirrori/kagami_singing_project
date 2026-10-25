@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 let selectedStatus = 'pending';
+let authenticated = false;
+let loadSequence = 0;
 
 function message(id, text = '', error = false) {
   const node = $(id); node.textContent = text; node.classList.toggle('error', error);
@@ -17,7 +19,8 @@ async function api(path, options = {}) {
   return value;
 }
 
-function showDashboard(authenticated) {
+function showDashboard(value) {
+  authenticated = value;
   $('loginPanel').hidden = authenticated;
   $('reviewPanel').hidden = !authenticated;
   $('logoutBtn').hidden = !authenticated;
@@ -39,9 +42,13 @@ function renderRequests(requests) {
 }
 
 async function loadRequests() {
+  const sequence = ++loadSequence;
   message('adminMessage', '');
-  try { renderRequests((await api(`/api/admin/requests?status=${selectedStatus}`)).requests); }
-  catch (error) { message('adminMessage', error.message, true); }
+  try {
+    const result = await api(`/api/admin/requests?status=${selectedStatus}`);
+    if (sequence === loadSequence) renderRequests(result.requests);
+  }
+  catch (error) { if (sequence === loadSequence) message('adminMessage', error.message, true); }
 }
 
 $('loginForm').addEventListener('submit', async event => {
@@ -59,6 +66,8 @@ $('logoutBtn').addEventListener('click', async () => {
   finally { showDashboard(false); }
 });
 $('refreshBtn').addEventListener('click', loadRequests);
+window.addEventListener('focus', () => { if (authenticated) loadRequests(); });
+document.addEventListener('visibilitychange', () => { if (authenticated && !document.hidden) loadRequests(); });
 $('filters').addEventListener('click', event => {
   const button = event.target.closest('[data-status]');
   if (!button) return;

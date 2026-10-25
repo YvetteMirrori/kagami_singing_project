@@ -18,9 +18,9 @@ function sourceProjection(original) {
   for (let offset = 0; offset < source.length;) {
     const character = String.fromCodePoint(source.codePointAt(offset));
     const end = offset + character.length;
-    if (!/\s/u.test(character)) {
+    if (!/[\s\p{P}]/u.test(character)) {
       for (const normalized of normalizeCharacters(character)) {
-        if (!/\s/u.test(normalized)) units.push({ normalized, start: offset, end });
+        if (!/[\s\p{P}]/u.test(normalized)) units.push({ normalized, start: offset, end });
       }
     }
     offset = end;
@@ -32,14 +32,17 @@ function restoreSurface(segment, projection, lineId) {
   const expected = Array.from(canonical(segment));
   const units = projection.units.slice(projection.cursor, projection.cursor + expected.length);
   if (units.length !== expected.length || units.map(unit => unit.normalized).join('') !== expected.join('')) {
-    throw new Error(`第 ${lineId} 句的分词含有无法对齐的字符（可能是漏字或标点）。`);
+    throw new Error(`第 ${lineId} 句的分词含有无法对齐的正文字符（存在漏字、多字或语序变化）。`);
   }
   projection.cursor += expected.length;
-  return units.length ? projection.source.slice(units[0].start, units.at(-1).end) : '';
+  if (!units.length) return '';
+  const start = projection.wordEnd ?? units[0].start;
+  projection.wordEnd = units.at(-1).end;
+  return projection.source.slice(start, projection.wordEnd);
 }
 
 function restoreAnnotated(annotation, projection, lineId) {
-  const readings = /([\p{Script=Han}々〆ヶヵ]+)[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー\s]+)[）)]/gu;
+  const readings = /([\p{Script=Han}々〆ヶヵA-Za-zＡ-Ｚａ-ｚ]+)[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー\s]+)[）)]/gu;
   let offset = 0;
   let restored = '';
   for (const match of annotation.matchAll(readings)) {
@@ -53,13 +56,28 @@ function restoreAnnotated(annotation, projection, lineId) {
 
 export function expandLine(row, expected) {
   const projection = sourceProjection(expected.original);
-  const line = Array.isArray(row?.w) ? {
-    id: row.id, original: expected.original, translation: row.t,
-    tokens: row.w.map(word => {
-      const annotated = typeof word?.a === 'string' ? restoreAnnotated(word.a, projection, expected.id) : '';
-      return { surface: stripReadings(annotated), annotated, romaji: word?.r, meaning: word?.m };
-    })
-  } : row;
+  if (!Array.isArray(row?.w)) return validateAnalysis({ lines: [row] }, [expected]).lines[0];
+  const tokens = [];
+  let end = 0;
+  const addPunctuation = gap => {
+    const marks = gap.replace(/\s/gu, '');
+    if (marks) tokens.push({ surface: marks, annotated: marks, romaji: marks, meaning: marks });
+  };
+  for (const word of row.w) {
+    if (typeof word?.a !== 'string' || !word.a.trim()) throw new Error(`第 ${expected.id} 句的词格资料不完整。`);
+    // Standalone model punctuation is replaced by the exact source punctuation.
+    if (!canonical(word.a)) continue;
+    const start = projection.units[projection.cursor]?.start;
+    projection.wordEnd = undefined;
+    const annotated = restoreAnnotated(word.a, projection, expected.id);
+    addPunctuation(projection.source.slice(end, start));
+    const romaji = typeof word.r === 'string' ? word.r.replace(/^\p{P}+|\p{P}+$/gu, marks => marks.replace(/[^'’\-]/gu, '')) : word.r;
+    tokens.push({ surface: stripReadings(annotated), annotated, romaji, meaning: word.m });
+    end = projection.wordEnd;
+  }
+  if (projection.cursor !== projection.units.length) throw new Error(`第 ${expected.id} 句的分词遗漏了正文字符。`);
+  addPunctuation(projection.source.slice(end));
+  const line = { id: row.id, original: expected.original, translation: row.t, tokens };
   return validateAnalysis({ lines: [line] }, [expected]).lines[0];
 }
 

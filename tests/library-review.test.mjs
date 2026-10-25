@@ -30,6 +30,14 @@ test('song submissions stay private until admin approval, then become searchable
   const submitted = await request('/api/upload-requests', { method: 'POST', headers, body: JSON.stringify({ title: '猫の歌', data: analysis }) });
   const submittedValue = await submitted.json();
   assert.equal(submitted.status, 201, JSON.stringify(submittedValue));
+  const duplicate = await request('/api/upload-requests', { method: 'POST', headers, body: JSON.stringify({ title: '猫の歌', data: analysis }) });
+  assert.equal(duplicate.status, 200);
+  assert.deepEqual(await duplicate.json(), submittedValue);
+  const receipt = await request('/api/upload-requests/receipt', { method: 'POST', headers, body: JSON.stringify({ id: submittedValue.id, title: '猫の歌', data: analysis }) });
+  assert.deepEqual(await receipt.json(), submittedValue);
+  const wrongData = structuredClone(analysis); wrongData.lines[0].translation = '修改了';
+  assert.equal((await request('/api/upload-requests/receipt', { method: 'POST', headers, body: JSON.stringify({ id: submittedValue.id, title: '猫の歌', data: wrongData }) })).status, 404);
+  assert.equal((await request('/api/upload-requests/receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: submittedValue.id, title: '猫の歌', data: analysis }) })).status, 403);
   assert.deepEqual((await (await request('/api/songs?prefix=猫')).json()).songs, []);
   assert.equal((await request('/api/admin/requests')).status, 401);
 
@@ -37,7 +45,9 @@ test('song submissions stay private until admin approval, then become searchable
   assert.equal(login.status, 200);
   const cookie = login.headers.get('set-cookie').split(';', 1)[0];
   const pending = await request('/api/admin/requests?status=pending', { headers: { Cookie: cookie } });
-  const requestId = (await pending.json()).requests[0].id;
+  const pendingValue = await pending.json();
+  assert.equal(pendingValue.requests.length, 1);
+  const requestId = pendingValue.requests[0].id;
   const approved = await request(`/api/admin/requests/${requestId}/approve`, { method: 'POST', headers: { ...headers, Cookie: cookie }, body: JSON.stringify({ note: '' }) });
   assert.equal(approved.status, 200);
 
@@ -59,7 +69,7 @@ test('admin login rejects a wrong password and does not issue a session cookie',
   const response = await fetch(`${origin}/api/admin/login`, {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: 'incorrect' })
+    body: JSON.stringify({ password: 'test-incorrect' })
   });
   assert.equal(response.status, 401);
   assert.equal(response.headers.get('set-cookie'), null);

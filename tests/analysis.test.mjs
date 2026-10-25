@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { parseLyrics, validateAnalysis, canonical, toFourLines } from '../public/lib.mjs';
+import { parseLyrics, validateAnalysis, canonical, stripReadings, toFourLines } from '../public/lib.mjs';
 import { sample, sampleText } from '../public/sample.mjs';
 import { ANALYSIS_BATCH_SIZE, ANALYSIS_MAX_PARALLEL, createApp, requestBatch, resolveConfig } from '../server.mjs';
 import { expandLine, planAnalysis } from '../analysis-wire.mjs';
@@ -187,10 +187,16 @@ test('短歌词单次请求；长歌词并发分批且按原句顺序返回', as
   assert.equal((await fetch(`${base}/.env`)).status, 404);
 });
 
-test('紧凑输出可无损展开；参考读音不同的重复句不共用分析', () => {
-  for (const line of sample.lines) assert.deepEqual(expandLine(compactLine(line), line), {
-    ...line, tokens: line.tokens.map(t => ({ ...t, surface: t.annotated.replace(/([\p{Script=Han}々〆ヶヵ]+)[（(][\p{Script=Hiragana}\p{Script=Katakana}ー\s]+[）)]/gu, '$1') }))
-  });
+test('紧凑输出保留正文、读音、词义与原标点；参考读音不同的重复句不共用分析', () => {
+  for (const line of sample.lines) {
+    const expanded = expandLine(compactLine(line), line);
+    assert.equal(expanded.translation, line.translation);
+    assert.equal(expanded.tokens.map(token => token.surface).join('').replace(/\s/gu, ''), stripReadings(line.original).replace(/\s/gu, ''));
+    const lexical = expanded.tokens.filter(token => canonical(token.surface));
+    assert.deepEqual(lexical.map(token => token.meaning), line.tokens.map(token => token.meaning));
+    assert.deepEqual(lexical.map(token => canonical(token.romaji)), line.tokens.map(token => canonical(token.romaji)));
+    validateAnalysis({ lines: [expanded] }, [{ id: line.id, original: line.original }]);
+  }
   const plan = planAnalysis(parseLyrics('運命\nsa da me\n運命\nu n me i\n運命\nsa da me', 'paired'));
   assert.equal(plan.representatives.length, 2);
   assert.deepEqual(plan.sourceIds, [1, 2, 1]);
@@ -209,14 +215,19 @@ test('全角与半角标点按兼容字符校验，同时恢复原歌词标点',
   ] };
   const expanded = expandLine(row, expected);
   assert.equal(expanded.original, expected.original);
-  assert.equal(expanded.tokens[3].annotated, 'out！');
+  assert.equal(expanded.tokens[3].annotated, 'out');
+  assert.deepEqual(expanded.tokens[4], { surface: '！', annotated: '！', romaji: '！', meaning: '！' });
   assert.equal(expanded.tokens.map(token => token.surface).join(''), "Let'sspreaditout！互い願ったまま");
   assert.equal(canonical(expected.original), canonical("Let's spread it out!互い願ったまま"));
   assert.equal(canonical('「夢」、見る。'), canonical('"夢",見る.'));
 
   const omittedMark = structuredClone(row);
   omittedMark.w[3].a = 'out';
-  assert.throws(() => expandLine(omittedMark, expected), /字符|标点/);
+  assert.deepEqual(expandLine(omittedMark, expected), expanded);
+
+  const missingText = structuredClone(row);
+  missingText.w[2].a = 'i';
+  assert.throws(() => expandLine(missingText, expected), /正文字符/);
 
   const quoteExpected = { id: 44, original: '「夢」、見る。' };
   const quoteRow = { id: 44, t: '看见梦。', w: [
@@ -225,7 +236,42 @@ test('全角与半角标点按兼容字符校验，同时恢复原歌词标点',
     { a: '見る.', r: 'miru', m: '看见' }
   ] };
   const quoteExpanded = expandLine(quoteRow, quoteExpected);
-  assert.deepEqual(quoteExpanded.tokens.map(token => token.annotated), ['「夢」', '、', '見る。']);
+  assert.deepEqual(quoteExpanded.tokens.map(token => token.annotated), ['「', '夢', '」、', '見る', '。']);
+});
+
+test('标点的省略、添加、替换与单独分词不影响正文对齐，原标点在各行恢复', () => {
+  const original = '「夢」…！？（ねぇ）';
+  const expected = { id: 1, original };
+  const words = [
+    { a: '夢（ゆめ）', r: 'yume', m: '梦' },
+    { a: 'ねぇ', r: 'nee', m: '喂' }
+  ];
+  const baseline = expandLine({ id: 1, t: '梦，喂。', w: words }, expected);
+  for (const w of [words, [
+    { a: '"夢（ゆめ）"...', r: 'yume', m: '梦' },
+    { a: '！', r: '!', m: '感叹' },
+    { a: '(ねぇ)!', r: 'nee', m: '喂' }
+  ]]) assert.deepEqual(expandLine({ id: 1, t: '梦，喂。', w }, expected), baseline);
+  assert.equal(baseline.tokens.map(word => word.surface).join(''), original);
+  for (const token of baseline.tokens.filter(word => !canonical(word.surface))) {
+    assert.equal(token.romaji, token.surface);
+    assert.equal(token.meaning, token.surface);
+  }
+  for (const changed of ['夢ね', '夢ねぇよ', 'ねぇ夢']) {
+    assert.throws(() => expandLine({ id: 1, t: '测试', w: [{ a: changed, r: 'test', m: '测试' }] }, expected), /正文字符/);
+  }
+});
+
+test('英文假名提示不当作正文；正文字符内部的撇号、读音和标点均恢复', () => {
+  const expected = { id: 1, original: "I(アイ)／My(マイ)／Me(ミー)は Let's spread it out！互い願ったまま" };
+  const w = ['I', 'My', 'Me', 'は', 'Lets', 'spread', 'it', 'out', '互い', '願（ねが）った', 'まま'].map(a => ({ a, r: a, m: '测试' }));
+  const result = expandLine({ id: 1, t: '测试', w }, expected);
+  assert.equal(result.tokens.map(token => token.surface).join(''), "I／My／MeはLet'sspreaditout！互い願ったまま");
+  assert.equal(result.tokens.find(token => token.surface === '願った').annotated, '願（ねが）った');
+  assert.equal(canonical('She(シー)／Her（ハー）'), 'SheHer');
+  assert.equal(canonical('（ねぇ）'), 'ねぇ');
+  const inner = expandLine({ id: 1, t: '测试', w: [{ a: '夢（ゆめ）君（きみ）', r: 'yume kimi', m: '梦 你' }] }, { id: 1, original: '夢、君' });
+  assert.equal(inner.tokens[0].annotated, '夢（ゆめ）、君（きみ）');
 });
 
 test('结构修复只重做无效句子，不回传上一份大段输出', async () => {

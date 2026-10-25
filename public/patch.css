@@ -128,10 +128,16 @@
 .song-search-result small { flex: none; color: #777d73; font-size: 11px; }
 .upload-control {
   display: flex;
+  position: relative;
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
 }
+.upload-tools { display: flex; align-items: center; gap: 10px; min-width: 175px; padding-bottom: 17px; }
+.upload-tools:has(.upload-control[hidden]) { min-width: 0; padding-bottom: 0; }
+.upload-tools .upload-note { position: absolute; top: calc(100% + 3px); left: 0; }
+.upload-action { display: flex; align-items: center; gap: 7px; }
+.upload-success { color: #58734e; font-size: 20px; font-weight: 600; line-height: 1; }
 .upload-control[hidden] { display: none; }
 .upload-button {
   display: inline-flex;

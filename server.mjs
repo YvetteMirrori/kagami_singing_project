@@ -27,12 +27,15 @@ function sendJson(res, status, value) {
   res.end(JSON.stringify(value));
 }
 async function readJson(req, limit = 180000) {
-  let body = '';
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body) > limit) throw new Error('请求过大，请分段输入。');
+    size += chunk.length;
+    if (size > limit) throw new Error('请求过大，请分段输入。');
+    chunks.push(chunk);
   }
-  try { return JSON.parse(body); } catch { throw new Error('请求不是有效 JSON。'); }
+  // Decode after joining bytes: a network chunk can split a Japanese UTF-8 character.
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('请求不是有效 JSON。'); }
 }
 function requestIp(req) {
   const forwarded = req.headers['cf-connecting-ip'];
@@ -243,14 +246,13 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
       if (!song) { sendJson(res, 404, { error: '没有找到这首已审核歌曲。' }); return; }
       sendJson(res, 200, { song: { id: song.id, title: song.title, data: JSON.parse(song.data) } }); return;
     }
-    if (req.method === 'POST' && pathname === '/api/upload-requests') {
+    if (req.method === 'POST' && ['/api/upload-requests', '/api/upload-requests/receipt'].includes(pathname)) {
       if (!sameOrigin(req)) { sendJson(res, 403, { error: '只允许从本站提交上传申请。' }); return; }
       if (!req.headers['content-type']?.startsWith('application/json')) { sendJson(res, 415, { error: '请使用 JSON 请求。' }); return; }
+      const checkingReceipt = pathname.endsWith('/receipt');
       const now = Date.now(), ip = requestIp(req);
       for (const [key, value] of uploadAttempts) if (now - value.started > 3600000) uploadAttempts.delete(key);
       const entry = uploadAttempts.get(ip) || { started: now, count: 0 };
-      if (entry.count >= 5) { sendJson(res, 429, { error: '上传申请较多，请一小时后重试。' }); return; }
-      entry.count++; uploadAttempts.set(ip, entry);
       try {
         const input = await readJson(req, 2000000);
         const title = typeof input.title === 'string' ? input.title.normalize('NFKC').trim().replace(/\s+/gu, ' ') : '';
@@ -259,8 +261,19 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
         const encoded = JSON.stringify(data);
         if (Buffer.byteLength(encoded) > 1800000) throw new Error('翻译数据过大，暂时无法提交。');
         const titleKey = normalizeSongTitle(title);
+        if (checkingReceipt) {
+          const receipt = Number.isSafeInteger(input.id) && db.prepare('SELECT id, status FROM upload_requests WHERE id = ? AND title_key = ? AND data = ?').get(input.id, titleKey, encoded);
+          if (!receipt) { sendJson(res, 404, { error: '服务器中没有这条上传记录，请重新提交。' }); return; }
+          sendJson(res, 200, { id: receipt.id, status: receipt.status }); return;
+        }
         if (db.prepare('SELECT 1 FROM songs WHERE title_key = ?').get(titleKey)) { sendJson(res, 409, { error: '数据库中已有这首歌，可直接搜索使用。' }); return; }
-        if (db.prepare("SELECT 1 FROM upload_requests WHERE title_key = ? AND status = 'pending'").get(titleKey)) { sendJson(res, 409, { error: '这首歌已有一条待审核申请。' }); return; }
+        const pending = db.prepare("SELECT id, data FROM upload_requests WHERE title_key = ? AND status = 'pending'").get(titleKey);
+        if (pending) {
+          if (pending.data === encoded) { sendJson(res, 200, { id: pending.id, status: 'pending' }); return; }
+          sendJson(res, 409, { error: '这首歌已有一条待审核申请。' }); return;
+        }
+        if (entry.count >= 5) { sendJson(res, 429, { error: '上传申请较多，请一小时后重试。' }); return; }
+        entry.count++; uploadAttempts.set(ip, entry);
         const result = db.prepare('INSERT INTO upload_requests(title, title_key, data, line_count, submitted_at) VALUES(?, ?, ?, ?, ?)').run(title, titleKey, encoded, data.lines.length, new Date().toISOString());
         sendJson(res, 201, { id: Number(result.lastInsertRowid), status: 'pending' });
       } catch (error) { sendJson(res, 400, { error: error.message || '申请提交失败。' }); }

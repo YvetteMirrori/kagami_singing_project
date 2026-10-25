@@ -2,14 +2,15 @@ export const MAX_CHARS = 16000;
 export const MAX_LINES = 200;
 
 export function stripReadings(text) {
-  return text.replace(/([\p{Script=Han}々〆ヶヵ]+)[（(][\p{Script=Hiragana}\p{Script=Katakana}ー\s]+[）)]/gu, '$1');
+  return text.replace(/([\p{Script=Han}々〆ヶヵA-Za-zＡ-Ｚａ-ｚ]+)[（(][\p{Script=Hiragana}\p{Script=Katakana}ー\s]+[）)]/gu, '$1');
 }
 export function normalizeCharacters(text) {
   return text.normalize('NFKC')
     .replace(/[、]/gu, ',').replace(/[。]/gu, '.')
     .replace(/[「」『』“”]/gu, '"').replace(/[‘’]/gu, "'");
 }
-export function canonical(text) { return normalizeCharacters(stripReadings(text)).replace(/\s/gu, ''); }
+// Punctuation is restored from the source locally; only lyric text must match.
+export function canonical(text) { return normalizeCharacters(stripReadings(text)).replace(/[\s\p{P}]/gu, ''); }
 
 function isSpacedRomaji(text, original) {
   // References copied from music services often contain punctuation, quoted
@@ -77,7 +78,7 @@ export function validateAnalysis(value, expected) {
       if (!token || ['surface', 'annotated', 'romaji', 'meaning'].some(k => typeof token[k] !== 'string' || !token[k].trim() || token[k].length > 1000)) throw new Error(`第 ${line.id} 句的词格资料不完整。`);
       if (canonical(token.surface) !== canonical(token.annotated)) throw new Error(`第 ${line.id} 句的标音改变了原词。`);
     }
-    if (canonical(line.tokens.map(t => t.surface).join('')) !== canonical(line.original)) throw new Error(`第 ${line.id} 句的分词与原文不一致（请检查字符缺漏或标点差异）。`);
+    if (canonical(line.tokens.map(t => t.surface).join('')) !== canonical(line.original)) throw new Error(`第 ${line.id} 句的分词与原文不一致（存在漏字、多字或语序变化）。`);
   }
   return value;
 }

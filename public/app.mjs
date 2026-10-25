@@ -14,6 +14,8 @@ let saveTimer;
 let showSoramimi = false;
 let searchTimer;
 let searchSequence = 0;
+let uploading = false;
+let uploadConfirmed = false;
 const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 function toast(message) {
@@ -72,9 +74,13 @@ function render() {
 }
 function updateUploadControl() {
   const data = state.data;
+  const current = Boolean(data && $('lyrics').value === state.source && $('inputMode').value === state.mode);
+  const submitted = Boolean(current && state.uploadRequestId && uploadConfirmed && $('songTitle').value.trim() === state.uploadTitle);
   $('uploadControl').hidden = !data || state.isSample || Boolean(state.libraryId);
-  $('uploadBtn').disabled = Boolean(!data || state.uploadRequestId || $('lyrics').value !== state.source || $('inputMode').value !== state.mode);
-  $('uploadBtn').innerHTML = state.uploadRequestId ? '<svg><use href="#i-check"/></svg>已提交审核' : '<svg><use href="#i-book"/></svg>上传';
+  $('uploadBtn').disabled = Boolean(!current || submitted || uploading || controller);
+  $('uploadBtn').innerHTML = `<svg><use href="#i-book"/></svg>${uploading ? '上传中…' : '上传'}`;
+  $('uploadSuccess').hidden = !submitted;
+  $('uploadSuccess').title = submitted ? `已送达后台审核 · 申请 #${state.uploadRequestId}` : '';
 }
 function updateAnalyzeButton() {
   const libraryResultIsCurrent = Boolean(state.libraryId && state.data && $('lyrics').value === state.source && $('inputMode').value === state.mode);
@@ -107,6 +113,7 @@ function busy(value) {
   $('analysisProgress').classList.remove('is-streaming');
   updateAnalyzeButton();
   $('workspace').setAttribute('aria-busy', String(value));
+  updateUploadControl();
 }
 function updateConnection() {
   const connected = Boolean(config.apiKey || serverStatus.configured);
@@ -169,19 +176,46 @@ async function loadLibrarySong(id) {
   } catch (error) { status(error.message, true); }
 }
 async function submitUpload() {
+  if (uploading) return;
   const title = $('songTitle').value.trim();
   if (!state.data || $('lyrics').value !== state.source || $('inputMode').value !== state.mode) { status('请先完成当前歌词的分析，再提交收录申请。', true); return; }
   if (!title) { status('请填写歌曲官方原名后再提交。', true); $('songTitle').focus(); return; }
-  const button = $('uploadBtn');
-  button.disabled = true;
+  const data = state.data;
+  uploading = true; updateUploadControl();
   try {
-    const response = await fetch('/api/upload-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, data: state.data }) });
-    const value = await response.json();
+    const response = await fetch('/api/upload-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, data }), signal: AbortSignal.timeout(30000) });
+    const value = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(value.error || '申请提交失败。');
-    state.title = title; state.uploadRequestId = value.id;
+    if (!Number.isSafeInteger(value.id) || value.id < 1 || value.status !== 'pending') throw new Error('服务器没有确认收到申请，请重试。');
+    if (state.data !== data) { toast(`收录申请 #${value.id} 已送达后台审核。`); return; }
+    state.uploadRequestId = value.id; state.uploadTitle = title; uploadConfirmed = true;
     render(); persist();
-    status('收录申请已提交，审核通过后会出现在搜索结果中。');
-  } catch (error) { button.disabled = false; status(error.message, true); }
+    status(`收录申请 #${value.id} 已送达后台审核，通过后会出现在搜索结果中。`);
+    toast('上传成功，已送达后台审核。');
+  } catch (error) {
+    const message = error.name === 'TimeoutError' ? '上传确认超时，请重试；相同数据不会重复提交。' : error.message;
+    status(message, true); toast(message);
+  } finally { uploading = false; updateUploadControl(); }
+}
+async function verifyUploadReceipt() {
+  if (!state.data || !state.uploadRequestId) return;
+  const snapshot = state;
+  const title = snapshot.uploadTitle || snapshot.title;
+  try {
+    const response = await fetch('/api/upload-requests/receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: snapshot.uploadRequestId, title, data: snapshot.data }), signal: AbortSignal.timeout(15000) });
+    const value = await response.json().catch(() => ({}));
+    if (state !== snapshot) return;
+    if (response.status === 404 || value.status === 'rejected') {
+      delete state.uploadRequestId; delete state.uploadTitle;
+      status(value.status === 'rejected' ? '上次收录申请未通过审核，可修改后重新提交。' : '上次上传记录未在服务器中找到，请重新点击上传。', true);
+      persist();
+    } else if (!response.ok) throw new Error(value.error || '无法核实上传记录。');
+    else if (value.id === snapshot.uploadRequestId && ['pending', 'approved'].includes(value.status)) {
+      state.uploadTitle = title; uploadConfirmed = true; persist();
+    }
+  } catch {
+    if (state === snapshot) status('暂时无法核实上次上传，可重新点击上传确认；相同数据不会重复提交。', true);
+  } finally { updateUploadControl(); }
 }
 async function analyze() {
   if (controller) return;
@@ -275,6 +309,7 @@ $('clearBtn').addEventListener('click', () => { $('lyrics').value = ''; updateCo
 for (const id of ['lyrics', 'inputMode']) $(id).addEventListener('input', () => { updateCount(); clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250); });
 $('songTitle').addEventListener('input', () => {
   if (state.data) { state.title = $('songTitle').value.trim(); $('sheetTitle').textContent = state.title || '未命名的歌'; }
+  updateUploadControl();
   clearTimeout(searchTimer); searchTimer = setTimeout(() => searchSongs($('songTitle').value), 180);
   clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250);
 });
@@ -408,6 +443,7 @@ function restore() {
     model: typeof saved.model === 'string' ? saved.model.slice(0, 150) : '',
     libraryId: Number.isSafeInteger(saved.libraryId) ? saved.libraryId : null,
     uploadRequestId: Number.isSafeInteger(saved.uploadRequestId) ? saved.uploadRequestId : null,
+    uploadTitle: typeof saved.uploadTitle === 'string' ? saved.uploadTitle.slice(0, 120) : '',
     requestSignature: typeof saved.requestSignature === 'string' && savedData ? saved.requestSignature : '',
     usage: saved.usage && typeof saved.usage === 'object' ? saved.usage : null,
     savings: saved.savings && typeof saved.savings === 'object' ? saved.savings : null
@@ -432,6 +468,7 @@ function restore() {
   updateCount(); render();
 }
 restore();
+void verifyUploadReceipt();
 try {
   const response = await fetch('/api/status');
   if (!response.ok) throw new Error();
