@@ -23,7 +23,7 @@ node --env-file-if-exists=.env server.mjs
 - DeepSeek：服务器环境变量使用 `DEEPSEEK_BASE_URL=https://api.deepseek.com`、`DEEPSEEK_MODEL=deepseek-flash` 和 `DEEPSEEK_API_KEY`。网页只展示服务状态，不暴露密钥。
 - 歌词草稿与分析结果会自动恢复；API 地址、模型名称和密钥只由服务器环境读取，不会保存到浏览器或前端文件。
 - 要运行服务，复制 `.env.example` 为服务器私有环境文件，填写 `DEEPSEEK_API_KEY`，重新启动。`.env` 已加入忽略文件。不要把实际密钥写进项目或 Git。
-- 配置后，点击「开始逐句分析」。输入不会自动触发付费调用。模型结果有误时可导出 JSON 修订再导入。
+- 配置后，点击「开始逐词分析」。输入不会自动触发付费调用。模型结果有误时可导出 JSON 修订再导入。
 
 当前没有实际密钥，开发验证使用模拟上游验证完整请求流程；真实模型的读音、翻译准确率、访问权限和费用需在配置自己的服务后确认。
 
