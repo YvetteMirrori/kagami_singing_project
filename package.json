@@ -1,6 +1,6 @@
 {
   "name": "kotoba-lyrics",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "日语歌词逐词分析与对齐阅读工作台",

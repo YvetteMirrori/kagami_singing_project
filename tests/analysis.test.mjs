@@ -97,18 +97,16 @@ test('特殊读音括号与标点保留；校验拒绝漏句、改写、分词�
   assert.throws(() => parseLyrics('あ'.repeat(16001)), /字符/);
   assert.throws(() => parseLyrics(Array(201).fill('愛').join('\n')), /200/);
 });
-test('模型设置：密钥不回传，公网只接受官方 DeepSeek 和 OpenAI API', () => {
-  assert.throws(() => resolveConfig({}, {}), /密钥/);
-  assert.throws(() => resolveConfig({ apiKey: 'test', baseUrl: 'http://remote.example/v1' }, {}), /HTTPS/);
-  const result = resolveConfig({ apiKey: 'client-key', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' }, {}, false);
-  assert.equal(result.apiKey, 'client-key'); assert.equal(result.model, 'deepseek-flash');
+test('统一 DeepSeek 服务：忽略客户端配置且不回传密钥', () => {
+  assert.throws(() => resolveConfig({}, {}), /DeepSeek/);
+  const result = resolveConfig({ apiKey: 'client-key', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-astra' }, { DEEPSEEK_API_KEY: 'server-key', DEEPSEEK_BASE_URL: 'https://api.deepseek.com', DEEPSEEK_MODEL: 'deepseek-flash' }, false);
+  assert.equal(result.apiKey, 'server-key'); assert.equal(result.model, 'deepseek-flash');
   assert.equal(result.baseUrl, 'https://api.deepseek.com');
-  assert.equal(resolveConfig({ apiKey: 'openai-key', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-astra' }, {}, false).model, 'gpt-6-astra');
-  assert.throws(() => resolveConfig({ apiKey: 'x', baseUrl: 'https://attacker.example', model: 'm' }, {}, false), /官方 API/);
+  assert.throws(() => resolveConfig({}, { DEEPSEEK_API_KEY: 'x', DEEPSEEK_BASE_URL: 'https://attacker.example' }, false), /DeepSeek/);
 });
 test('结构错误仅修复一次，并保持目标行及完整上下文', async () => {
   const targets = parseLyrics(sampleText).slice(0, 2);
-  const config = resolveConfig({ apiKey: 'not-a-real-key' }, {});
+  const config = resolveConfig({}, { DEEPSEEK_API_KEY: 'test-key' });
   const requests = [];
   const mock = async (_url, opts) => {
     const body = JSON.parse(opts.body); requests.push(body);
@@ -117,13 +115,13 @@ test('结构错误仅修复一次，并保持目标行及完整上下文', async
   };
   const result = await requestBatch(config, parseLyrics(sampleText), targets, new AbortController().signal, mock);
   assert.equal(result.length, 2); assert.equal(requests.length, 2);
-  assert.equal(requests[0].response_format.json_schema.strict, true);
+  assert.deepEqual(requests[0].response_format, { type: 'json_object' });
   assert.equal(JSON.parse(requests[0].messages[1].content).context.length, 33);
   assert.equal(requests[1].messages.at(-1).role, 'user');
 });
 test('兼容 JSON 模式及提供商错误不泄露密钥', async () => {
   const signal = new AbortController().signal;
-  const config = resolveConfig({ apiKey: 'secret-value', format: 'json_object' }, {});
+  const config = resolveConfig({}, { DEEPSEEK_API_KEY: 'secret-value', DEEPSEEK_BASE_URL: 'https://api.deepseek.com', DEEPSEEK_MODEL: 'deepseek-flash' });
   await assert.rejects(requestBatch(config, [], [], signal, async (_url, opts) => {
     assert.deepEqual(JSON.parse(opts.body).response_format, { type: 'json_object' });
     return new Response('secret-value', { status: 401 });
@@ -139,8 +137,8 @@ test('短歌词单次请求；长歌词并发分批且按原句顺序返回', as
   }));
   let active = 0;
   let maxActive = 0;
-  const server = createApp({ env: { OPENAI_API_KEY: 'test-only-key' }, fetcher: async (url, opts) => {
-    assert.equal(url, 'https://api.openai.com/v1/chat/completions');
+  const server = createApp({ env: { DEEPSEEK_API_KEY: 'test-only-key' }, fetcher: async (url, opts) => {
+    assert.equal(url, 'https://api.deepseek.com/chat/completions');
     const body = JSON.parse(opts.body); const payload = JSON.parse(body.messages[1].content);
     calls.push(payload.targetIds);
     active++; maxActive = Math.max(maxActive, active);
@@ -277,7 +275,7 @@ test('英文假名提示不当作正文；正文字符内部的撇号、读音�
 test('结构修复只重做无效句子，不回传上一份大段输出', async () => {
   const targets = parseLyrics(sampleText).slice(0, 2);
   const requests = [];
-  await requestBatch(resolveConfig({ apiKey: 'test' }, {}), targets, targets, new AbortController().signal, async (_url, opts) => {
+  await requestBatch(resolveConfig({}, { DEEPSEEK_API_KEY: 'test' }), targets, targets, new AbortController().signal, async (_url, opts) => {
     const body = JSON.parse(opts.body); requests.push(body);
     const rows = requests.length === 1 ? [compactLine(sample.lines[0])] : [compactLine(sample.lines[1])];
     return Response.json({ choices: [{ message: { content: JSON.stringify({ lines: rows }) } }] });
@@ -291,7 +289,7 @@ test('DeepSeek 关闭额外思考；SSE 用量统计、跨块读取与紧凑格�
   const target = [{ id: 1, original: '愛', reference: '' }];
   const row = { id: 1, t: '爱', w: [{ a: '愛（あい）', r: 'ai', m: '爱' }] };
   const reports = [];
-  const config = resolveConfig({ apiKey: 'test', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', format: 'json_object' }, {});
+  const config = resolveConfig({}, { DEEPSEEK_API_KEY: 'test', DEEPSEEK_BASE_URL: 'https://api.deepseek.com', DEEPSEEK_MODEL: 'deepseek-flash' });
   const result = await requestBatch(config, target, target, new AbortController().signal, async (_url, opts) => {
     const body = JSON.parse(opts.body);
     assert.deepEqual(body.thinking, { type: 'disabled' });
@@ -308,10 +306,10 @@ test('DeepSeek 关闭额外思考；SSE 用量统计、跨块读取与紧凑格�
 test('副歌只生成一次、所有重复句完整展开；同首缓存命中不调用模型', async t => {
   let calls = 0;
   const targetIds = [];
-  const server = createApp({ env: { OPENAI_API_KEY: 'test' }, fetcher: async (_url, opts) => {
+  const server = createApp({ env: { DEEPSEEK_API_KEY: 'test' }, fetcher: async (_url, opts) => {
     calls++;
     const body = JSON.parse(opts.body);
-    assert.equal(body.thinking, undefined);
+    assert.deepEqual(body.thinking, { type: 'disabled' });
     const payload = JSON.parse(body.messages[1].content);
     targetIds.push(payload.targetIds);
     return Response.json({ choices: [{ message: { content: JSON.stringify({ lines: payload.targetIds.map(id => compactLine(sample.lines[id - 1])) }) } }], usage: { prompt_tokens: 100, completion_tokens: 200 } });
@@ -333,16 +331,16 @@ test('副歌只生成一次、所有重复句完整展开；同首缓存命中�
   assert.equal(hit.usage.requests, 0);
   assert.equal(hit.savings.cachedLines, 31);
   assert.deepEqual(hit.data, first.data);
-  await post({ model: 'different-model' }); assert.equal(calls, 2);
-  await post({ apiKey: 'different-key' }); assert.equal(calls, 3);
+  await post({ model: 'different-model' }); assert.equal(calls, 1);
+  await post({ apiKey: 'different-key' }); assert.equal(calls, 1);
 });
 
 test('公网请求按真实 Host 进入受限模式并使用用户选择的密钥与模型', async t => {
-  const server = createApp({ env: { OPENAI_API_KEY: 'legacy-server-key', OPENAI_MODEL: 'legacy-server-model' }, fetcher: async (url, opts) => {
-    assert.equal(url, 'https://api.openai.com/v1/chat/completions');
-    assert.equal(opts.headers.Authorization, 'Bearer browser-key');
+  const server = createApp({ env: { DEEPSEEK_API_KEY: 'server-key', DEEPSEEK_MODEL: 'deepseek-flash' }, fetcher: async (url, opts) => {
+    assert.equal(url, 'https://api.deepseek.com/chat/completions');
+    assert.equal(opts.headers.Authorization, 'Bearer server-key');
     const body = JSON.parse(opts.body);
-    assert.equal(body.model, 'gpt-6-astra');
+    assert.equal(body.model, 'deepseek-flash');
     const payload = JSON.parse(body.messages[1].content);
     const target = payload.context.find(row => row[0] === payload.targetIds[0]);
     return Response.json({ choices: [{ message: { content: JSON.stringify({ lines: [{ id: target[0], t: '爱', w: [{ a: '愛（あい）', r: 'ai', m: '爱' }] }] }) } }] });

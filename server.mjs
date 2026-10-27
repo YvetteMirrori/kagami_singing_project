@@ -60,21 +60,19 @@ function publicAnalysis(value) {
     tokens: line.tokens.map(token => ({ surface: token.surface, annotated: token.annotated, romaji: token.romaji, meaning: token.meaning }))
   })) };
 }
-export function resolveConfig(input = {}, env = process.env, local = true) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('模型设置无效。');
+export function resolveConfig(_input = {}, env = process.env, _local = true) {
   const config = {
-    apiKey: input.apiKey || env.OPENAI_API_KEY || '',
-    baseUrl: input.baseUrl || env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    model: input.model || env.OPENAI_MODEL || 'gpt-6-astra',
-    format: input.format || env.LLM_OUTPUT_MODE || 'json_schema'
+    apiKey: env.DEEPSEEK_API_KEY || '',
+    baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    model: env.DEEPSEEK_MODEL || 'deepseek-flash',
+    format: 'json_object'
   };
   if (Object.values(config).some(v => typeof v !== 'string') || config.model.length > 150 || config.apiKey.length > 1000) throw new Error('模型设置无效。');
-  if (!config.apiKey.trim()) throw new Error('还没有配置模型密钥。请点击右上角「模型设置」，或在 .env 中填写 OPENAI_API_KEY。');
+  if (!config.apiKey.trim()) throw new Error('DeepSeek 服务尚未配置，请稍后重试。');
   const url = new URL(config.baseUrl);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('请填写有效的 API 根地址。');
   if (url.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('远程模型服务必须使用 HTTPS。');
-  if (!local && !['api.deepseek.com', 'api.openai.com'].includes(url.hostname)) throw new Error('公网暂时只支持 DeepSeek 与 OpenAI 官方 API 地址。');
-  if (!['json_schema', 'json_object', 'prompt'].includes(config.format)) throw new Error('不支持的输出格式。');
+  if (url.hostname !== 'api.deepseek.com' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('DeepSeek 服务地址无效。');
   config.baseUrl = config.baseUrl.replace(/\/+$/, '');
   return config;
 }
@@ -231,7 +229,7 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
     }
     if (req.method === 'GET' && pathname === '/api/status') {
       const local = isLocalRequest(req);
-      sendJson(res, 200, { configured: Boolean(env.OPENAI_API_KEY), model: env.OPENAI_MODEL || 'gpt-6-astra', baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', local, format: env.LLM_OUTPUT_MODE || 'json_schema' }); return;
+      sendJson(res, 200, { configured: Boolean(env.DEEPSEEK_API_KEY), provider: 'DeepSeek', model: env.DEEPSEEK_MODEL || 'deepseek-flash', baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com', local, format: 'json_object' }); return;
     }
     if (req.method === 'GET' && pathname === '/api/library') {
       const songs = db.prepare('SELECT id, title, line_count AS lineCount FROM songs ORDER BY title_key, id').all();
@@ -370,12 +368,12 @@ export function createApp({ env = process.env, fetcher = fetch } = {}) {
     try {
       const input = await readJson(req);
       const lines = parseLyrics(input.lyrics, input.mode || 'auto');
-      const config = resolveConfig(input.config, env, isLocalRequest(req));
+      const config = resolveConfig({}, env, isLocalRequest(req));
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'X-Accel-Buffering': 'no' });
       emit({ type: 'progress', completed: 0, total: lines.length });
       const { representatives, sourceIds } = planAnalysis(lines);
-      // Scope reuse to the exact song, provider, model, format and credential.
-      const scope = createHash('sha256').update(JSON.stringify([lines, config.baseUrl, config.model, config.format, config.apiKey])).digest('hex');
+      // Scope reuse to this song and the server-managed DeepSeek configuration.
+      const scope = createHash('sha256').update(JSON.stringify([lines, config.baseUrl, config.model, config.format])).digest('hex');
       const analyzed = new Map();
       const pending = representatives.filter(line => {
         const hit = cache.get(`${scope}:${line.id}`);
@@ -442,6 +440,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const port = Number(process.env.PORT || 8787);
   const server = createApp();
   server.requestTimeout = 120000;
-  server.listen(port, host, () => console.log(`\n  日语小白唱见拯救计划\n  http://${host}:${port}\n  ${process.env.OPENAI_API_KEY ? '模型已配置' : '示例可用；在网页「模型设置」中接入模型'}\n`));
+  server.listen(port, host, () => console.log(`\n  日语小白唱见拯救计划\n  http://${host}:${port}\n  ${process.env.DEEPSEEK_API_KEY ? 'DeepSeek 服务已配置' : '示例可用；请在服务器环境中配置 DeepSeek 服务'}\n`));
   server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `端口 ${port} 已被占用，请在 .env 中修改 PORT。` : error.message); process.exitCode = 1; });
 }

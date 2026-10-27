@@ -33,7 +33,7 @@ function persist() {
   try {
     localStorage.setItem(storageKey, JSON.stringify({
       input: $('lyrics').value, title: $('songTitle').value, mode: $('inputMode').value,
-      state, config, view: $('cleanBtn').classList.contains('selected') ? 'clean' : 'grid', fontSize: $('fontSize').value, showSoramimi
+      state, view: $('cleanBtn').classList.contains('selected') ? 'clean' : 'grid', fontSize: $('fontSize').value, showSoramimi
     }));
   } catch { $('storageLabel')?.remove(); toast('浏览器未能保存这次修改，请导出 JSON 留存。'); }
 }
@@ -118,15 +118,9 @@ function busy(value) {
   updateUploadControl();
 }
 function updateConnection() {
-  const connected = Boolean(config.apiKey || serverStatus.configured);
+  const connected = Boolean(serverStatus.configured);
   $('connectionDot').classList.toggle('connected', connected);
-  $('settingsBtn').title = connected ? '模型已配置，点击修改' : '尚未配置模型，点击连接';
-}
-function fillSettings() {
-  $('baseUrl').value = config.baseUrl || '';
-  $('modelName').value = config.model || '';
-  $('apiKey').value = config.apiKey || '';
-  $('outputFormat').value = config.format || 'json_schema';
+  $('settingsBtn').title = connected ? 'DeepSeek 服务已连接' : 'DeepSeek 服务暂未配置';
 }
 function usageLabel(usage) {
   if (usage.requests === 0) return '本次未调用模型';
@@ -191,7 +185,7 @@ async function loadLibrarySong(id) {
     $('lyrics').value = source;
     $('inputMode').value = 'raw';
     const expected = parseLyrics(source, 'raw');
-    const requestSignature = JSON.stringify([expected, config.baseUrl || serverStatus.baseUrl || '', config.model || serverStatus.model || '', config.format || serverStatus.format || 'json_schema']);
+    const requestSignature = JSON.stringify([expected, serverStatus.provider || 'DeepSeek', serverStatus.model || 'deepseek-flash', serverStatus.format || 'json_object']);
     state = { data, title: song.title, source, mode: 'raw', isSample: false, model: '数据库收录', requestSignature, libraryId: song.id };
     updateCount(); render(); persist();
     status('已载入数据库中的审核歌曲，本次未调用模型。');
@@ -245,21 +239,15 @@ async function analyze() {
   let expected;
   try { expected = parseLyrics($('lyrics').value, $('inputMode').value); }
   catch (error) { status(error.message, true); $('lyrics').focus(); return; }
-  const requestSignature = JSON.stringify([expected, config.baseUrl || serverStatus.baseUrl || '', config.model || serverStatus.model || '', config.format || serverStatus.format || 'json_schema']);
+  const requestSignature = JSON.stringify([expected, serverStatus.provider || 'DeepSeek', serverStatus.model || 'deepseek-flash', serverStatus.format || 'json_object']);
   if (state.data && !state.isSample && state.requestSignature === requestSignature) {
     state.title = $('songTitle').value.trim();
     render(); persist();
     status('已使用本机保存的完整结果，本次未调用模型。');
     return;
   }
-  if (!config.apiKey) {
-    status('请输入模型密钥后再开始分析。');
-    fillSettings();
-    $('settingsDialog').showModal();
-    $('apiKey').focus();
-    return;
-  }
-  const input = { lyrics: $('lyrics').value, mode: $('inputMode').value, config };
+  if (!serverStatus.configured) { status('DeepSeek 服务暂未配置，请稍后重试。', true); return; }
+  const input = { lyrics: $('lyrics').value, mode: $('inputMode').value };
   const title = $('songTitle').value.trim();
   controller = new AbortController();
   busy(true); status(`正在连接模型，准备分析 ${expected.length} 句…`);
@@ -390,22 +378,6 @@ document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('c
   const rect = dialog.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
 }));
-$('settingsForm').addEventListener('submit', event => {
-  event.preventDefault();
-  const baseUrl = $('baseUrl').value.trim();
-  try {
-    const parsed = new URL(baseUrl);
-    if (!['https:', 'http:'].includes(parsed.protocol) || /\/chat\/completions\/?$/.test(parsed.pathname) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error();
-  } catch { $('settingsStatus').textContent = '请填写有效的 API 根地址，例如 DeepSeek 或 OpenAI 的地址。'; return; }
-  const model = $('modelName').value.trim();
-  if (!model) { $('settingsStatus').textContent = '请填写你要使用的模型名称。'; $('modelName').focus(); return; }
-  const apiKey = $('apiKey').value.trim();
-  if (!apiKey) { $('settingsStatus').textContent = '请输入 API Key；密钥只保存在本机浏览器。'; $('apiKey').focus(); return; }
-  config = { baseUrl, model, apiKey, format: $('outputFormat').value };
-  persist(); updateConnection(); $('settingsStatus').textContent = ''; $('settingsDialog').close();
-  toast('模型设置已保存。点击「开始逐句分析」使用。');
-});
-$('forgetKeyBtn').addEventListener('click', () => { config.apiKey = ''; $('apiKey').value = ''; persist(); updateConnection(); toast('已清除本机保存的密钥。'); });
 $('exportJsonBtn').addEventListener('click', () => { if (state.data) download(`${safeName()}.json`, JSON.stringify({ version: 1, title: state.title, source: state.source, mode: state.mode, isSample: state.isSample, model: state.model, showSoramimi, ...state.data }, null, 2), 'application/json;charset=utf-8'); });
 $('exportTextBtn').addEventListener('click', () => { if (state.data) download(`${safeName()}.txt`, toFourLines(state.data), 'text/plain;charset=utf-8'); });
 $('printBtn').addEventListener('click', () => { $('exportDialog').close(); window.print(); });
@@ -483,12 +455,7 @@ function restore() {
     usage: saved.usage && typeof saved.usage === 'object' ? saved.usage : null,
     savings: saved.savings && typeof saved.savings === 'object' ? saved.savings : null
   };
-  config = value.config && typeof value.config === 'object' ? {
-    baseUrl: typeof value.config.baseUrl === 'string' ? value.config.baseUrl.slice(0, 500) : '',
-    model: typeof value.config.model === 'string' ? value.config.model.slice(0, 150) : '',
-    apiKey: typeof value.config.apiKey === 'string' ? value.config.apiKey.slice(0, 1000) : '',
-    format: ['json_schema', 'json_object', 'prompt'].includes(value.config.format) ? value.config.format : 'json_schema'
-  } : {};
+  config = {};
   $('lyrics').value = typeof value.input === 'string' ? value.input.slice(0, 16000) : resultSource;
   $('songTitle').value = typeof value.title === 'string' ? value.title.slice(0, 120) : state.title;
   $('inputMode').value = ['auto', 'raw', 'paired'].includes(value.mode) ? value.mode : savedMode;
@@ -508,11 +475,7 @@ try {
   const response = await fetch('/api/status');
   if (!response.ok) throw new Error();
   serverStatus = await response.json();
-  $('modelName').placeholder = '例如 deepseek-flash 或 OpenAI 模型 ID';
-  $('outputFormat').value = 'json_schema';
-  $('configFields').disabled = false;
-  $('publicConfigNote').hidden = serverStatus.local;
-  $('forgetKeyBtn').hidden = false;
-  fillSettings();
+  $('settingsBtn').lastChild.textContent = 'DeepSeek 服务';
+  $('publicConfigNote').textContent = serverStatus.configured ? 'DeepSeek 服务已连接，可以直接开始逐词分析。' : 'DeepSeek 服务暂未配置，请联系网站制作者。';
   updateConnection();
 } catch { status('未连接本地服务。请运行启动脚本，再通过 http://127.0.0.1:8787 打开网页。', true); }

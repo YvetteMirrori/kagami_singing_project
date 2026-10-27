@@ -41,17 +41,38 @@ function restoreSurface(segment, projection, lineId) {
   return projection.source.slice(start, projection.wordEnd);
 }
 
-function restoreAnnotated(annotation, projection, lineId) {
-  const readings = /([\p{Script=Han}々〆ヶヵA-Za-zＡ-Ｚａ-ｚ]+)[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー\s]+)[）)]/gu;
+const readingAnnotation = /([\p{Script=Han}々〆ヶヵA-Za-zＡ-Ｚａ-ｚ]+)[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー\s]+)[）)]/gu;
+
+function restoreAnnotatedSurface(annotation, projection, lineId) {
   let offset = 0;
   let restored = '';
-  for (const match of annotation.matchAll(readings)) {
+  for (const match of annotation.matchAll(readingAnnotation)) {
     restored += restoreSurface(annotation.slice(offset, match.index), projection, lineId);
     restored += restoreSurface(match[1], projection, lineId);
     restored += `（${match[2]}）`;
     offset = match.index + match[0].length;
   }
   return restored + restoreSurface(annotation.slice(offset), projection, lineId);
+}
+
+function annotatedReading(annotation) {
+  readingAnnotation.lastIndex = 0;
+  return annotation.replace(readingAnnotation, '$2');
+}
+
+function restoreAnnotated(annotation, projection, lineId) {
+  const cursor = projection.cursor;
+  const wordEnd = projection.wordEnd;
+  try {
+    return restoreAnnotatedSurface(annotation, projection, lineId);
+  } catch (surfaceError) {
+    const reading = annotatedReading(annotation);
+    if (reading === annotation) throw surfaceError;
+    projection.cursor = cursor;
+    projection.wordEnd = wordEnd;
+    // Models may normalize kana into kanji, such as いう -> 言（い）う.
+    return restoreSurface(reading, projection, lineId);
+  }
 }
 
 export function expandLine(row, expected) {

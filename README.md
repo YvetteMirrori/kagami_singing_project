@@ -18,13 +18,11 @@ node --env-file-if-exists=.env server.mjs
 
 ## 真实模型分析
 
-点击「开始逐句分析」时，如果本机还没有密钥，网页会弹出「模型设置」。填写 API 根地址、模型 ID、API Key 即可。支持 DeepSeek、OpenAI Chat Completions 及其他兼容服务；根地址不包含 `/chat/completions`，请以服务商文档为准。
+点击「开始逐词分析」即可使用网站统一配置的 DeepSeek 服务。访客无需填写 API 根地址、模型名称或 API Key；服务端固定使用 `https://api.deepseek.com` 的 `deepseek-flash` 模型。
 
-- DeepSeek：根地址 `https://api.deepseek.com`，模型填写 `deepseek-flash`，输出模式选择「JSON 对象」。网页保存上次的连接设置，也可随时切换到 OpenAI。
-- OpenAI：根地址 `https://api.openai.com/v1`，选择服务账户实际可用的模型，输出模式可选择「严格结构化 JSON」。
-- 其他兼容服务：填写其 API 根地址与模型 ID；不支持 JSON Schema 时，选择「JSON 对象」；若也不支持该模式，可选择「仅提示词约束」。
-- API 地址、模型名称、输出格式和密钥保存在本机浏览器；歌词草稿与分析结果也会自动恢复。可在模型设置中清除已保存密钥。
-- 要长期使用服务器配置，复制 `.env.example` 为 `.env`，填写 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`，重新启动。`.env` 已加入忽略文件。不要把实际密钥写进前端文件。
+- DeepSeek：服务器环境变量使用 `DEEPSEEK_BASE_URL=https://api.deepseek.com`、`DEEPSEEK_MODEL=deepseek-flash` 和 `DEEPSEEK_API_KEY`。网页只展示服务状态，不暴露密钥。
+- 歌词草稿与分析结果会自动恢复；API 地址、模型名称和密钥只由服务器环境读取，不会保存到浏览器或前端文件。
+- 要运行服务，复制 `.env.example` 为服务器私有环境文件，填写 `DEEPSEEK_API_KEY`，重新启动。`.env` 已加入忽略文件。不要把实际密钥写进项目或 Git。
 - 配置后，点击「开始逐句分析」。输入不会自动触发付费调用。模型结果有误时可导出 JSON 修订再导入。
 
 当前没有实际密钥，开发验证使用模拟上游验证完整请求流程；真实模型的读音、翻译准确率、访问权限和费用需在配置自己的服务后确认。
